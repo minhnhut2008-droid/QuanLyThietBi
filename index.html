@@ -8,6 +8,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <title>Quản Lý Thiết Bị</title>
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -24,7 +25,7 @@
 </header>
 <main id="app" class="max-w-6xl mx-auto p-4 pb-24"></main>
 <div id="gate" class="hidden fixed inset-0 z-40 bg-slate-100 items-center justify-center p-4"><div id="gbox" class="bg-white rounded-2xl shadow p-6 w-full max-w-sm"></div></div>
-<div id="modal" class="hidden fixed inset-0 bg-black/50 z-30 items-end md:items-center justify-center"><div id="mbox" class="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-5 max-h-[90vh] overflow-auto"></div></div>
+<div id="modal" class="hidden fixed inset-0 bg-black/50 z-50 items-end md:items-center justify-center"><div id="mbox" class="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-5 max-h-[90vh] overflow-auto"></div></div>
 <div id="pdfroot" style="position:absolute;left:-10000px;top:0;width:800px;background:#fff"></div>
 <script>
 const TABS=[['dash','Tổng quan'],['dev','Danh mục'],['tr','Giao nhận'],['log','Nhật ký']];
@@ -42,31 +43,33 @@ async function flush(){if(!cloud||busy||!navigator.onLine)return;busy=true;
  busy=false;sync()}
 function sync(){const e=document.getElementById('st');if(!e)return;const n=Q.length;
  e.textContent=noCloud?'Chỉ lưu trên máy này':!navigator.onLine?'○ Ngoại tuyến'+(n?' · '+n+' thay đổi chờ gửi':''):!live?'◌ Đang kết nối…'+(n?' · '+n+' chờ gửi':''):n?'● Đang gửi '+n+' thay đổi…':'● Đã đồng bộ'}
+let prof=null,pc=null,pcShown=false,got={},regPhone='';try{const c=new URLSearchParams(location.search).get('c');if(c){const p=c.split('.');pc={id:p[0],tk:p[1]}}}catch(e){}
+const base=()=>location.origin+location.pathname,mailOf=v=>v.includes('@')?v:v.replace(/\D/g,'')+'@qltb.vn';
 let fs,auth,me=null,role='',accounts=[],regName='',roleUnsub=null,unsubs=[],dataOn=false;
 function showGate(x){const g=document.getElementById('gate');document.getElementById('gbox').innerHTML=x;g.classList.remove('hidden');g.classList.add('flex')}
 function hideGate(){const g=document.getElementById('gate');g.classList.add('hidden');g.classList.remove('flex')}
 const gv=k=>document.getElementById(k).value.trim(),LOGO='<h1 class="text-xl font-bold text-blue-900 mb-1">★ Quản Lý Thiết Bị</h1>';
-function showLogin(msg){showGate(LOGO+`<p class="text-sm text-slate-500 mb-4">Đăng nhập để tiếp tục</p>${msg?`<p class="text-sm text-red-600 mb-3">${E(msg)}</p>`:''}<input id="g_name" class="inp mb-2" placeholder="Họ tên (chỉ khi đăng ký)"><input id="g_mail" type="email" class="inp mb-2" placeholder="Email"><input id="g_pw" type="password" class="inp mb-4" placeholder="Mật khẩu (từ 6 ký tự)"><button class="btn bg-blue-800 text-white w-full mb-2" onclick="doLogin()">Đăng nhập</button><button class="btn bg-slate-100 w-full" onclick="doReg()">Đăng ký tài khoản mới</button>`)}
+function showLogin(msg){showGate(LOGO+`<p class="text-sm text-slate-500 mb-4">Đăng nhập để tiếp tục</p>${msg?`<p class="text-sm text-red-600 mb-3">${E(msg)}</p>`:''}<input id="g_name" class="inp mb-2" placeholder="Họ tên (chỉ khi đăng ký)"><input id="g_mail" inputmode="tel" class="inp mb-2" placeholder="Số điện thoại (Zalo)"><input id="g_pw" type="password" class="inp mb-4" placeholder="Mật khẩu (từ 6 ký tự)"><button class="btn bg-blue-800 text-white w-full mb-2" onclick="doLogin()">Đăng nhập</button><button class="btn bg-slate-100 w-full" onclick="doReg()">Đăng ký tài khoản mới</button>`)}
 function showWait(t){showGate(LOGO+`<p class="my-4">${t}</p><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>`)}
-function doLogin(){auth.signInWithEmailAndPassword(gv('g_mail'),document.getElementById('g_pw').value).catch(()=>showLogin('Sai email hoặc mật khẩu'))}
-function doReg(){const n=gv('g_name');if(!n)return alert('Nhập họ tên');regName=n;auth.createUserWithEmailAndPassword(gv('g_mail'),document.getElementById('g_pw').value).catch(e=>showLogin('Không đăng ký được: '+e.code))}
-function logout(){if(Q.length&&!confirm('Còn '+Q.length+' thay đổi chưa gửi lên máy chủ. Đăng xuất sẽ làm mất. Tiếp tục?'))return;
- try{localStorage.removeItem('gn_v2');localStorage.removeItem('gn_admin')}catch(e){}S={devices:{},staff:{},transfers:{},holders:{},requests:{}};Q=[];derive();auth.signOut()}
-function stopData(){unsubs.forEach(f=>f());unsubs=[];dataOn=false;live=false;cloud=null}
+function doLogin(){auth.signInWithEmailAndPassword(mailOf(gv('g_mail')),document.getElementById('g_pw').value).catch(()=>showLogin('Sai số điện thoại hoặc mật khẩu'))}
+function doReg(){const n=gv('g_name');if(!n)return alert('Nhập họ tên');const v=gv('g_mail');if(!v.includes('@')&&!/^0\d{9,10}$/.test(v.replace(/\D/g,'')))return alert('Nhập số điện thoại 10 số, ví dụ 0912345678');regName=n;regPhone=v.includes('@')?'':v.replace(/\D/g,'');auth.createUserWithEmailAndPassword(mailOf(v),document.getElementById('g_pw').value).catch(e=>showLogin(e.code==='auth/email-already-in-use'?'Số điện thoại này đã đăng ký':'Không đăng ký được: '+e.code))}
+function logout(){const go=()=>{try{localStorage.removeItem('gn_v2');localStorage.removeItem('gn_admin')}catch(e){}S={devices:{},staff:{},transfers:{},holders:{},requests:{}};Q=[];derive();auth.signOut()};
+ if(Q.length)ask('Còn '+Q.length+' thay đổi chưa gửi lên máy chủ. Đăng xuất sẽ làm mất.',go,'Đăng xuất');else go()}
+function stopData(){got={};unsubs.forEach(f=>f());unsubs=[];dataOn=false;live=false;cloud=null}
 function startData(){if(dataOn)return;dataOn=true;cloud={doc:p=>fs.doc(p)};
  COLS.forEach(c=>unsubs.push(fs.collection(c).onSnapshot(s=>{if(s.metadata.fromCache)return;const n={};s.docs.forEach(x=>{n[x.id]={...x.data()}});
-  Q.forEach(q=>{if(q.c===c){if(q.op==='set')n[key(q.id)]=q.data;else delete n[key(q.id)]}});S[c]=n;live=true;derive();persist();render();flush()},()=>{live=false;sync()})));
+  Q.forEach(q=>{if(q.c===c){if(q.op==='set')n[key(q.id)]=q.data;else delete n[key(q.id)]}});S[c]=n;live=true;got[c]=1;derive();persist();render();flush();checkConfirm()},()=>{live=false;sync()})));
  if(admin)unsubs.push(fs.collection('users').onSnapshot(s=>{accounts=s.docs.map(x=>({uid:x.id,...x.data()}));if(cat==='acc')render()},()=>{}));flush()}
 function watchRole(u){if(roleUnsub)roleUnsub();roleUnsub=fs.doc('users/'+u.uid).onSnapshot(s=>{
- if(!s.exists){if(!s.metadata.fromCache)fs.doc('users/'+u.uid).set({name:regName||u.displayName||u.email,email:u.email,role:'pending',time:Date.now()}).catch(()=>{});return}
- role=s.data().role;admin=role==='admin';try{localStorage.setItem('gn_admin',admin?'1':'0')}catch(e){}
+ if(!s.exists){if(!s.metadata.fromCache)fs.doc('users/'+u.uid).set({name:regName||u.displayName||u.email,email:u.email,phone:regPhone||(/@qltb\.vn$/.test(u.email)?u.email.split('@')[0]:''),role:'pending',time:Date.now()}).catch(()=>{});return}
+ prof=s.data();role=prof.role;admin=role==='admin';try{localStorage.setItem('gn_admin',admin?'1':'0')}catch(e){}
  if(admin||role==='user'){hideGate();startData();render()}else{stopData();showWait(role==='off'?'Tài khoản đã bị khóa.':'Tài khoản đang chờ admin duyệt. Vui lòng quay lại sau.')}},()=>{})}
 function startCloud(){const C=window.FIREBASE_CONFIG;if(!window.firebase||!C||!C.apiKey||/DAN_VAO/.test(C.apiKey)){noCloud=true;admin=true;return sync()}
  showGate('<p class="text-center py-6">Đang tải…</p>');
  firebase.initializeApp(C);auth=firebase.auth();fs=firebase.firestore();fs.enablePersistence({synchronizeTabs:true}).catch(()=>{});
  auth.onAuthStateChanged(u=>{me=u;if(!u){stopData();if(roleUnsub)roleUnsub();admin=false;showLogin();render();return}watchRole(u);render()})}
 function accList(){const R=[['pending','Chờ duyệt'],['user','Người dùng'],['admin','Admin'],['off','Khóa']];
- return `<h1 class="text-xl font-bold mb-1">Tài khoản</h1><p class="text-sm text-slate-500 mb-3">Người mới đăng ký ở trạng thái "Chờ duyệt". Chọn quyền để cho phép sử dụng.</p><div class="grid md:grid-cols-2 gap-3">${accounts.map(a=>`<div class="bg-white rounded-xl shadow-sm p-3"><b>${E(a.name)}</b><div class="text-sm text-slate-500 mb-2">${E(a.email)}</div><select class="inp" ${me&&a.uid===me.uid?'disabled':''} onchange="setRole('${a.uid}',this.value)">${R.map(r=>`<option value="${r[0]}" ${a.role===r[0]?'selected':''}>${r[1]}</option>`).join('')}</select></div>`).join('')}</div>`}
+ return `<h1 class="text-xl font-bold mb-1">Tài khoản</h1><p class="text-sm text-slate-500 mb-3">Người mới đăng ký ở trạng thái "Chờ duyệt". Chọn quyền để cho phép sử dụng.</p><div class="grid md:grid-cols-2 gap-3">${accounts.map(a=>`<div class="bg-white rounded-xl shadow-sm p-3"><b>${E(a.name)}</b><div class="text-sm text-slate-500 mb-2">${E(a.phone||a.email)}</div><select class="inp" ${me&&a.uid===me.uid?'disabled':''} onchange="setRole('${a.uid}',this.value)">${R.map(r=>`<option value="${r[0]}" ${a.role===r[0]?'selected':''}>${r[1]}</option>`).join('')}</select></div>`).join('')}</div>`}
 function setRole(uid,r){fs.doc('users/'+uid).update({role:r}).catch(()=>alert('Không đổi được quyền'))}
 function initData(){try{const x=JSON.parse(localStorage.getItem('gn_v2'));if(x&&x.S){S={...S,...x.S};Q=x.Q||[]}admin=localStorage.getItem('gn_admin')==='1'}catch(e){}derive();startCloud()}
 addEventListener('online',()=>{flush();sync()});addEventListener('offline',()=>{live=false;sync()});setInterval(flush,15000);
@@ -85,6 +88,10 @@ function reqList(){const L=Object.values(S.requests).sort((a,b)=>b.time-a.time);
  const row=r=>{const d=r.data,t=r.kind==='device'?`Thiết bị: <b>${E(d.id)} - ${E(d.name)}</b> (${E(d.type)}, ${E(d.serial)})`:`Cán bộ: <b>${E(d.name)}</b>`,p=r.status==='pending';
   return `<div class="bg-white rounded-xl shadow-sm p-3"><div class="flex justify-between gap-2 text-sm"><div>${t}<div class="text-slate-500">${fmt(r.time)}</div></div><span class="px-2 py-0.5 h-fit rounded-full text-xs font-semibold ${p?'bg-amber-100 text-amber-800':'bg-red-100 text-red-800'}">${p?'Chờ duyệt':'Bị từ chối'}</span></div>${admin?`<div class="mt-2 flex gap-2">${p?`<button class="btn bg-emerald-600 text-white flex-1" onclick="approve('${r.id}')">Duyệt</button><button class="btn bg-red-50 text-red-700 flex-1" onclick="rejectReq('${r.id}')">Từ chối</button>`:`<button class="btn bg-slate-100 flex-1" onclick="rm('requests','${r.id}')">Xóa</button>`}</div>`:''}</div>`};
  return `<h1 class="text-xl font-bold mb-1">Đề xuất chờ duyệt</h1><p class="text-sm text-slate-500 mb-3">${admin?'Bạn là admin: duyệt thì mục được đưa vào danh mục.':'Mục bạn đề xuất sẽ vào danh mục sau khi admin duyệt.'}</p><div class="grid md:grid-cols-2 gap-3">${L.map(row).join('')||'<p class="text-slate-500">Không có đề xuất nào.</p>'}</div>`}
+let _ask=null;
+function ask(msg,fn,yes){_ask=fn;modal(`<h2 class="font-bold text-lg mb-2">Xác nhận</h2><p class="mb-4">${E(msg)}</p><div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-red-600 text-white flex-1" onclick="closeM();_ask&&_ask()">${yes||'Đồng ý'}</button></div>`)}
+function toast(m){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.className='fixed bottom-24 z-[60] bg-slate-800 text-white text-sm rounded-xl px-4 py-3 shadow-lg';t.style.cssText='left:50%;transform:translateX(-50%);max-width:90vw';document.body.appendChild(t)}t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',4000)}
+window.alert=toast;
 function giverOf(d){const t=[...db.transfers].reverse().find(t=>t.deviceId===d.id&&t.status==='Đã hoàn tất'&&t.to===d.holder);return t?t.from:'Kho'}
 function retForm(id){const d=dev(id),to=giverOf(d);
  modal(`<h2 class="font-bold text-lg mb-3">Trả lại thiết bị</h2><p class="text-sm mb-3"><b>${E(d.name)}</b> (${E(d.serial)})<br>${E(d.holder)} → <b>${E(to)}</b> (người giao trước đó)</p><div class="mb-4 text-sm font-semibold">Ghi chú tình trạng khi trả<div class="mt-2 font-normal">${chips('r_note')}</div><textarea id="r_note" rows="3" class="inp font-normal" placeholder="Chọn gợi ý phía trên hoặc tự nhập…"></textarea></div><div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-blue-800 text-white flex-1" onclick="doRet('${d.id}')">Xác nhận trả lại</button></div>`)}
@@ -139,9 +146,9 @@ function saveStaff(i){const n=document.getElementById('s_name').value.trim();
  closeM()}
 function delStaff(i){const s=db.staff[i],c=db.devices.filter(d=>d.holder===s).length;
  if(c)return alert(s+' đang giữ '+c+' thiết bị. Hãy bàn giao về kho trước khi xóa.');
- if(confirm('Xóa cán bộ '+s+'? Lịch sử giao nhận cũ vẫn được giữ.')){rm('staff',db.staffObjs[i].id);if(jf.who===s)jf.who=''}}
-function delDev(id){if(confirm('Xóa thiết bị '+id+'?')){rm('devices',id)}}
-function transfers(){const cards=[...db.transfers].reverse().map(t=>`<div class="bg-white rounded-xl shadow-sm p-3"><div class="flex justify-between gap-2"><b>${E(dev(t.deviceId).name)}</b>${badge(t.status)}</div><div class="text-sm text-slate-500">${E(t.from)} → ${E(t.to)}<br>${fmt(t.time)}</div><div class="mt-2 flex flex-wrap gap-2">${t.status==='Chờ xác nhận'?`<button class="btn bg-blue-800 text-white flex-1" onclick="zalo('${t.id}')">Xác nhận qua Zalo</button>`:''}${t.status==='Đã hoàn tất'&&dev(t.deviceId).holder===t.to?`<button class="btn bg-violet-100 text-violet-800 flex-1" onclick="retForm('${t.deviceId}')">Trả lại</button>`:''}<button class="btn bg-slate-100 flex-1" onclick="pdfOne('${t.id}')">Xuất PDF</button></div></div>`).join('')||'<p class="text-slate-500">Chưa có phiếu.</p>';
+ {const sid=db.staffObjs[i].id;ask('Xóa cán bộ '+s+'? Lịch sử giao nhận cũ vẫn được giữ.',()=>{rm('staff',sid);if(jf.who===s)jf.who=''},'Xóa')}}
+function delDev(id){ask('Xóa thiết bị '+id+'?',()=>rm('devices',id),'Xóa')}
+function transfers(){const cards=[...db.transfers].reverse().map(t=>`<div class="bg-white rounded-xl shadow-sm p-3"><div class="flex justify-between gap-2"><b>${E(dev(t.deviceId).name)}</b>${badge(t.status)}</div><div class="text-sm text-slate-500">${E(t.from)} → ${E(t.to)}<br>${fmt(t.time)}</div><div class="mt-2 flex flex-wrap gap-2">${t.status==='Chờ xác nhận'?`<button class="btn bg-blue-800 text-white flex-1" onclick="zalo('${t.id}')">Hiện mã QR xác nhận</button>`:''}${t.status==='Đã hoàn tất'&&dev(t.deviceId).holder===t.to?`<button class="btn bg-violet-100 text-violet-800 flex-1" onclick="retForm('${t.deviceId}')">Trả lại</button>`:''}<button class="btn bg-slate-100 flex-1" onclick="pdfOne('${t.id}')">Xuất PDF</button></div></div>`).join('')||'<p class="text-slate-500">Chưa có phiếu.</p>';
  return `<div class="flex justify-between items-center mb-3"><h1 class="text-xl font-bold">Phiếu giao nhận</h1><button class="btn bg-blue-800 text-white" onclick="trForm()">+ Tạo phiếu</button></div><div class="grid md:grid-cols-2 gap-3">${cards}</div>`}
 function trForm(){const opt=a=>a.map(x=>`<option>${E(x)}</option>`).join('');
  modal(`<h2 class="font-bold text-lg mb-3">Tạo phiếu giao nhận</h2>
@@ -155,12 +162,13 @@ function trForm(){const opt=a=>a.map(x=>`<option>${E(x)}</option>`).join('');
 function saveTr(){const g=k=>document.getElementById(k).value;if(!g('t_dev'))return alert('Chưa có thiết bị');if(g('t_from')===g('t_to'))return alert('Bên giao và bên nhận phải khác nhau');
  const t={id:'PGN'+Date.now().toString().slice(-6),deviceId:g('t_dev'),from:g('t_from'),to:g('t_to'),time:Date.now(),note:g('t_note'),status:'Chờ xác nhận',token:Math.random().toString(36).slice(2,12)};
  put('transfers',t);zalo(t.id)}
-function zalo(id){const t=db.transfers.find(x=>x.id===id),link='https://app.domain.vn/verify?token='+t.token;
- modal(`<h2 class="font-bold text-lg mb-2">Gửi xác nhận qua Zalo OA/ZNS</h2><p class="text-sm text-slate-500 mb-2">Tin nhắn mẫu gửi tới <b>${E(t.to)}</b>:</p>
- <div class="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm mb-3">Kính gửi ${E(t.to)},<br>${E(t.from)} bàn giao cho đồng chí thiết bị <b>${E(dev(t.deviceId).name)}</b> (${E(dev(t.deviceId).serial)}) lúc ${fmt(t.time)}.<br>Vui lòng bấm vào liên kết để xác nhận đã nhận:<br><a class="text-blue-700 underline break-all">${link}</a></div>
- <p class="text-xs text-slate-500 mb-3">Đây là mô phỏng. Khi triển khai thật, backend gọi API Zalo ZNS và xác thực token.</p>
- <div class="flex gap-2 flex-col sm:flex-row"><button class="btn bg-slate-100 flex-1" onclick="closeM();render()">Đóng</button>${t.status==='Đã hoàn tất'?'':`<button class="btn bg-emerald-600 text-white flex-1" onclick="confirmTr('${t.id}')">Giả lập: cán bộ nhận bấm xác nhận</button>`}</div>`);render()}
-function confirmTr(id){const t={...db.transfers.find(x=>x.id===id),status:'Đã hoàn tất',doneAt:Date.now()},d0=db.devices.find(x=>x.id===t.deviceId),d=d0&&{...d0};
+function zalo(id){const t=db.transfers.find(x=>x.id===id),link=base()+'?c='+t.id+'.'+t.token;
+ modal(`<h2 class="font-bold text-lg mb-2">Mã QR xác nhận giao nhận</h2><p class="text-sm text-slate-500 mb-3">Người nhận <b>${E(t.to)}</b> đăng nhập app rồi quét mã bằng camera điện thoại để xác nhận. Hệ thống ghi lại tài khoản của người quét.</p><div id="qrbox" class="flex justify-center mb-3"></div><div class="text-xs break-all text-blue-700 mb-3">${link}</div><div class="flex gap-2 flex-col sm:flex-row"><button class="btn bg-slate-100 flex-1" onclick="navigator.clipboard&&navigator.clipboard.writeText('${link}');alert('Đã sao chép liên kết')">Sao chép liên kết</button>${t.status==='Chờ xác nhận'&&admin?`<button class="btn bg-emerald-600 text-white flex-1" onclick="confirmTr('${t.id}')">Admin xác nhận thay</button>`:''}<button class="btn bg-blue-800 text-white flex-1" onclick="closeM();render()">Đóng</button></div>`);
+ if(window.QRCode)new QRCode(document.getElementById('qrbox'),{text:link,width:200,height:200});render()}
+function checkConfirm(){if(!pc||pcShown||!got.transfers)return;const t=db.transfers.find(x=>x.id===pc.id);pcShown=true;history.replaceState(null,'',base());
+ if(!t)return alert('Không tìm thấy phiếu giao nhận.');if(t.token!==pc.tk)return alert('Mã QR không hợp lệ.');if(t.status!=='Chờ xác nhận')return alert('Phiếu này đã được xác nhận trước đó.');
+ const d=dev(t.deviceId);modal(`<h2 class="font-bold text-lg mb-3">Xác nhận nhận thiết bị</h2><p class="text-sm mb-3"><b>${E(d.name)}</b> (${E(d.serial)})<br>${E(t.from)} → <b>${E(t.to)}</b><br>${fmt(t.time)}<br>Ghi chú: ${E(t.note)||'-'}</p><p class="text-xs text-slate-500 mb-3">Bạn đang đăng nhập: <b>${E(prof&&prof.name)}</b> ${E(prof&&prof.phone)}</p><div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-emerald-600 text-white flex-1" onclick="confirmTr('${t.id}')">Tôi xác nhận đã nhận</button></div>`)}
+function confirmTr(id){const t={...db.transfers.find(x=>x.id===id),status:'Đã hoàn tất',doneAt:Date.now(),confirmBy:me?{uid:me.uid,name:(prof&&prof.name)||'',phone:(prof&&prof.phone)||'',email:me.email||''}:null},d0=db.devices.find(x=>x.id===t.deviceId),d=d0&&{...d0};
  closeM();put('transfers',t);if(d)put('holders',{id:d.id,holder:t.to})}
 let jf={from:'',to:'',who:''};
 function jList(){return db.transfers.filter(t=>(!jf.from||t.time>=new Date(jf.from).getTime())&&(!jf.to||t.time<=new Date(jf.to).getTime()+864e5-1)&&(!jf.who||t.from===jf.who||t.to===jf.who))}
@@ -182,7 +190,7 @@ function pdfOne(id){const t=db.transfers.find(x=>x.id===id),d=dev(t.deviceId);
  <p><b>I. BÊN GIAO:</b> ${E(t.from)}</p><p><b>II. BÊN NHẬN:</b> ${E(t.to)}</p><p><b>III. DANH SÁCH THIẾT BỊ:</b></p>
  <table ${TBL}><tr style="font-weight:bold"><td ${TD}>STT</td><td ${TD}>Mã</td><td ${TD}>Tên thiết bị</td><td ${TD}>Số serial</td><td ${TD}>Tình trạng khi giao</td></tr><tr><td ${TD}>1</td><td ${TD}>${E(d.id)}</td><td ${TD}>${E(d.name)}</td><td ${TD}>${E(d.serial)}</td><td ${TD}>${E(t.note)||'Bình thường'}</td></tr></table>
  <p>Trạng thái: <b>${t.status}</b>${t.doneAt?' (xác nhận lúc '+fmt(t.doneAt)+')':''}. Biên bản lập thành 02 bản, mỗi bên giữ 01 bản.</p>
- <table style="width:100%;text-align:center;margin-top:20px"><tr><td><b>BÊN GIAO</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${E(t.from)}</td><td><b>BÊN NHẬN</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${t.status==='Đã hoàn tất'?'<span style="color:#047857">✔ Đã xác nhận qua Zalo<br></span>':''}${E(t.to)}</td></tr></table>`,t.id+'.pdf')}
+ <table style="width:100%;text-align:center;margin-top:20px"><tr><td><b>BÊN GIAO</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${E(t.from)}</td><td><b>BÊN NHẬN</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${t.status==='Đã hoàn tất'?'<span style="color:#047857">✔ Đã xác nhận qua mã QR'+(t.confirmBy?': '+E(t.confirmBy.name)+(t.confirmBy.phone?' - '+E(t.confirmBy.phone):''):'')+'<br></span>':''}${E(t.to)}</td></tr></table>`,t.id+'.pdf')}
 function pdfLog(){const L=ordered(jList());const sub=[jf.from&&'từ '+jf.from,jf.to&&'đến '+jf.to,jf.who&&'cá nhân: '+jf.who].filter(Boolean).join(' · ')||'Toàn bộ';
  makePdf(`${HEAD}<h2 style="text-align:center;margin:24px 0 4px">SỔ NHẬT KÝ GIAO NHẬN THIẾT BỊ</h2><p style="text-align:center">${E(sub)}</p>
  <table ${TBL}><tr style="font-weight:bold"><td ${TD}>STT</td><td ${TD}>Thời gian</td><td ${TD}>Thiết bị</td><td ${TD}>Giao</td><td ${TD}>Nhận</td><td ${TD}>Trạng thái</td></tr>${L.map((t,i)=>`<tr><td ${TD}>${i+1}</td><td ${TD}>${fmt(t.time)}</td><td ${TD}>${E(dev(t.deviceId).name)}</td><td ${TD}>${E(t.from)}</td><td ${TD}>${E(t.to)}</td><td ${TD}>${t.status}</td></tr>`).join('')}</table><p>Tổng cộng: ${L.length} phiếu.</p>`,'so-nhat-ky.pdf')}

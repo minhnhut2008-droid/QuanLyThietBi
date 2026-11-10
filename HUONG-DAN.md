@@ -40,3 +40,9 @@ Chạy thử trên máy: `python -m http.server 8000` rồi mở http://localhos
 - Khi sửa mã nguồn, đổi `V='qltb-v1'` trong sw.js (ví dụ qltb-v2) để điện thoại nhận bản mới.
 - Dữ liệu nội bộ nhạy cảm: nên sao lưu định kỳ (Firestore export) và cân nhắc quy định bảo mật của đơn vị.
 - Mật khẩu do Firebase quản lý, app không lưu mật khẩu.
+
+## 7. Tài khoản bằng số điện thoại và xác nhận bằng mã QR (bản v2)
+- Đăng ký/đăng nhập bằng **số điện thoại + mật khẩu** (không gửi OTP, nên số chưa được xác thực; admin duyệt tài khoản để kiểm soát). Vẫn đăng nhập được bằng email nếu tài khoản tạo từ trước.
+- Mỗi phiếu có **mã QR** (nút "Hiện mã QR xác nhận"). Người nhận quét mã bằng camera điện thoại, đăng nhập app, bấm "Tôi xác nhận đã nhận". Phiếu chuyển sang "Đã hoàn tất" và lưu tên, số điện thoại, thời gian của người quét; thông tin này in trên biên bản PDF.
+- iPhone: mở liên kết từ camera sẽ vào Safari, có thể phải đăng nhập lại (khác với app đã thêm ra màn hình chính).
+- Đăng nhập bằng chính tài khoản Zalo (xác thực qua Zalo) cần thêm backend, xem hướng dẫn trao đổi riêng.
