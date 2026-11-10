@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#1e3a8a">
+<link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="QL Thiết Bị">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<title>Quản Lý Thiết Bị</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{background:#f1f5f9;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}.btn{min-height:44px;padding:0 16px;border-radius:10px;font-weight:600}.inp{width:100%;min-height:44px;border:1px solid #cbd5e1;border-radius:10px;padding:0 12px;background:#fff}textarea.inp{padding:10px 12px}</style>
+</head><body class="text-slate-800">
+<header class="bg-blue-900 text-white sticky top-0 z-20">
+ <div class="flex items-center justify-between px-4 h-14 max-w-6xl mx-auto">
+  <div><b>★ Quản Lý Thiết Bị</b><div id="st" class="text-[11px] text-blue-200 leading-tight"></div></div>
+  <nav class="hidden md:flex gap-1" id="nav"></nav>
+  <button class="md:hidden text-2xl w-11 h-11" onclick="document.getElementById('mnav').classList.toggle('hidden')" aria-label="Menu">☰</button>
+ </div>
+ <nav id="mnav" class="hidden md:hidden flex-col px-2 pb-2"></nav>
+</header>
+<main id="app" class="max-w-6xl mx-auto p-4 pb-24"></main>
+<div id="gate" class="hidden fixed inset-0 z-40 bg-slate-100 items-center justify-center p-4"><div id="gbox" class="bg-white rounded-2xl shadow p-6 w-full max-w-sm"></div></div>
+<div id="modal" class="hidden fixed inset-0 bg-black/50 z-30 items-end md:items-center justify-center"><div id="mbox" class="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-5 max-h-[90vh] overflow-auto"></div></div>
+<div id="pdfroot" style="position:absolute;left:-10000px;top:0;width:800px;background:#fff"></div>
+<script>
+const TABS=[['dash','Tổng quan'],['dev','Danh mục'],['tr','Giao nhận'],['log','Nhật ký']];
+const ST=['Mới','Đang sử dụng','Cần bảo trì'];
+let view='dash',q='',db,cat='dev';
+const COLS=['devices','staff','transfers','holders','requests'],key=s=>String(s).replace(/[^A-Za-z0-9_-]/g,c=>'~'+c.charCodeAt(0).toString(16)+'~');
+let S={devices:{},staff:{},transfers:{},holders:{},requests:{}},Q=[],cloud=null,noCloud=false,live=false,busy=false,admin=false;
+function derive(){const A=c=>Object.values(S[c]);db={devices:A('devices').map(d=>{const h=(S.holders[key(d.id)]||{holder:d.holder}).holder||'Kho';return{...d,holder:h,status:d.status==='Mới'&&h!=='Kho'?'Đang sử dụng':d.status}}).sort((a,b)=>a.id.localeCompare(b.id)),staffObjs:A('staff').sort((a,b)=>a.name.localeCompare(b.name,'vi')),transfers:A('transfers').sort((a,b)=>a.time-b.time).map(t=>t.kind==='return'?{...t,status:'Trả lại'}:t)};db.staff=db.staffObjs.map(s=>s.name)}
+function persist(){try{localStorage.setItem('gn_v2',JSON.stringify({S,Q}))}catch(e){}}
+function put(c,o){S[c][key(o.id)]=o;Q.push({op:'set',c,id:o.id,data:o});changed()}
+function rm(c,id){delete S[c][key(id)];Q.push({op:'del',c,id});changed()}
+function changed(){derive();persist();flush();render()}
+async function flush(){if(!cloud||busy||!navigator.onLine)return;busy=true;
+ try{while(Q.length){const q=Q[0],r=cloud.doc(q.c+'/'+key(q.id));if(q.op==='set')await r.set(JSON.parse(JSON.stringify(q.data)));else await r.delete();Q.shift();persist()}}catch(e){}
+ busy=false;sync()}
+function sync(){const e=document.getElementById('st');if(!e)return;const n=Q.length;
+ e.textContent=noCloud?'Chỉ lưu trên máy này':!navigator.onLine?'○ Ngoại tuyến'+(n?' · '+n+' thay đổi chờ gửi':''):!live?'◌ Đang kết nối…'+(n?' · '+n+' chờ gửi':''):n?'● Đang gửi '+n+' thay đổi…':'● Đã đồng bộ'}
+let fs,auth,me=null,role='',accounts=[],regName='',roleUnsub=null,unsubs=[],dataOn=false;
+function showGate(x){const g=document.getElementById('gate');document.getElementById('gbox').innerHTML=x;g.classList.remove('hidden');g.classList.add('flex')}
+function hideGate(){const g=document.getElementById('gate');g.classList.add('hidden');g.classList.remove('flex')}
+const gv=k=>document.getElementById(k).value.trim(),LOGO='<h1 class="text-xl font-bold text-blue-900 mb-1">★ Quản Lý Thiết Bị</h1>';
+function showLogin(msg){showGate(LOGO+`<p class="text-sm text-slate-500 mb-4">Đăng nhập để tiếp tục</p>${msg?`<p class="text-sm text-red-600 mb-3">${E(msg)}</p>`:''}<input id="g_name" class="inp mb-2" placeholder="Họ tên (chỉ khi đăng ký)"><input id="g_mail" type="email" class="inp mb-2" placeholder="Email"><input id="g_pw" type="password" class="inp mb-4" placeholder="Mật khẩu (từ 6 ký tự)"><button class="btn bg-blue-800 text-white w-full mb-2" onclick="doLogin()">Đăng nhập</button><button class="btn bg-slate-100 w-full" onclick="doReg()">Đăng ký tài khoản mới</button>`)}
+function showWait(t){showGate(LOGO+`<p class="my-4">${t}</p><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>`)}
+function doLogin(){auth.signInWithEmailAndPassword(gv('g_mail'),document.getElementById('g_pw').value).catch(()=>showLogin('Sai email hoặc mật khẩu'))}
+function doReg(){const n=gv('g_name');if(!n)return alert('Nhập họ tên');regName=n;auth.createUserWithEmailAndPassword(gv('g_mail'),document.getElementById('g_pw').value).catch(e=>showLogin('Không đăng ký được: '+e.code))}
+function logout(){if(Q.length&&!confirm('Còn '+Q.length+' thay đổi chưa gửi lên máy chủ. Đăng xuất sẽ làm mất. Tiếp tục?'))return;
+ try{localStorage.removeItem('gn_v2');localStorage.removeItem('gn_admin')}catch(e){}S={devices:{},staff:{},transfers:{},holders:{},requests:{}};Q=[];derive();auth.signOut()}
+function stopData(){unsubs.forEach(f=>f());unsubs=[];dataOn=false;live=false;cloud=null}
+function startData(){if(dataOn)return;dataOn=true;cloud={doc:p=>fs.doc(p)};
+ COLS.forEach(c=>unsubs.push(fs.collection(c).onSnapshot(s=>{if(s.metadata.fromCache)return;const n={};s.docs.forEach(x=>{n[x.id]={...x.data()}});
+  Q.forEach(q=>{if(q.c===c){if(q.op==='set')n[key(q.id)]=q.data;else delete n[key(q.id)]}});S[c]=n;live=true;derive();persist();render();flush()},()=>{live=false;sync()})));
+ if(admin)unsubs.push(fs.collection('users').onSnapshot(s=>{accounts=s.docs.map(x=>({uid:x.id,...x.data()}));if(cat==='acc')render()},()=>{}));flush()}
+function watchRole(u){if(roleUnsub)roleUnsub();roleUnsub=fs.doc('users/'+u.uid).onSnapshot(s=>{
+ if(!s.exists){if(!s.metadata.fromCache)fs.doc('users/'+u.uid).set({name:regName||u.displayName||u.email,email:u.email,role:'pending',time:Date.now()}).catch(()=>{});return}
+ role=s.data().role;admin=role==='admin';try{localStorage.setItem('gn_admin',admin?'1':'0')}catch(e){}
+ if(admin||role==='user'){hideGate();startData();render()}else{stopData();showWait(role==='off'?'Tài khoản đã bị khóa.':'Tài khoản đang chờ admin duyệt. Vui lòng quay lại sau.')}},()=>{})}
+function startCloud(){const C=window.FIREBASE_CONFIG;if(!window.firebase||!C||!C.apiKey||/DAN_VAO/.test(C.apiKey)){noCloud=true;admin=true;return sync()}
+ showGate('<p class="text-center py-6">Đang tải…</p>');
+ firebase.initializeApp(C);auth=firebase.auth();fs=firebase.firestore();fs.enablePersistence({synchronizeTabs:true}).catch(()=>{});
+ auth.onAuthStateChanged(u=>{me=u;if(!u){stopData();if(roleUnsub)roleUnsub();admin=false;showLogin();render();return}watchRole(u);render()})}
+function accList(){const R=[['pending','Chờ duyệt'],['user','Người dùng'],['admin','Admin'],['off','Khóa']];
+ return `<h1 class="text-xl font-bold mb-1">Tài khoản</h1><p class="text-sm text-slate-500 mb-3">Người mới đăng ký ở trạng thái "Chờ duyệt". Chọn quyền để cho phép sử dụng.</p><div class="grid md:grid-cols-2 gap-3">${accounts.map(a=>`<div class="bg-white rounded-xl shadow-sm p-3"><b>${E(a.name)}</b><div class="text-sm text-slate-500 mb-2">${E(a.email)}</div><select class="inp" ${me&&a.uid===me.uid?'disabled':''} onchange="setRole('${a.uid}',this.value)">${R.map(r=>`<option value="${r[0]}" ${a.role===r[0]?'selected':''}>${r[1]}</option>`).join('')}</select></div>`).join('')}</div>`}
+function setRole(uid,r){fs.doc('users/'+uid).update({role:r}).catch(()=>alert('Không đổi được quyền'))}
+function initData(){try{const x=JSON.parse(localStorage.getItem('gn_v2'));if(x&&x.S){S={...S,...x.S};Q=x.Q||[]}admin=localStorage.getItem('gn_admin')==='1'}catch(e){}derive();startCloud()}
+addEventListener('online',()=>{flush();sync()});addEventListener('offline',()=>{live=false;sync()});setInterval(flush,15000);
+let ord='desc';const NOTES=['Hoạt động bình thường','Bị khóa mã PIN','Thiếu phụ kiện','Trầy xước / móp méo','Pin yếu / hết pin','Màn hình bị nứt','Cần bảo trì'];
+const ordered=L=>ord==='desc'?[...L].reverse():[...L];
+const sortSel=()=>`<select class="inp" onchange="ord=this.value;render()"><option value="desc" ${ord==='desc'?'selected':''}>Mới nhất ở trên</option><option value="asc" ${ord==='asc'?'selected':''}>Cũ nhất ở trên</option></select>`;
+const chips=id=>`<div class="flex flex-wrap gap-2 mb-2">${NOTES.map(n=>`<button type="button" class="px-3 py-2 rounded-full bg-sky-50 text-sky-800 text-sm border border-sky-200" onclick="addNote('${id}',this.textContent)">${n}</button>`).join('')}</div>`;
+function addNote(id,t){const e=document.getElementById(id),v=e.value.trim();if(!v.split('; ').includes(t))e.value=v?v+'; '+t:t}
+function reqAdd(kind,data){closeM();put('requests',{id:'R'+Date.now().toString(36),kind,data,time:Date.now(),status:'pending'});alert('Đã gửi đề xuất, chờ admin duyệt.')}
+function approve(id){const r=Object.values(S.requests).find(x=>x.id===id);if(!r)return;
+ if(r.kind==='device'){if(db.devices.some(d=>d.id===r.data.id))return alert('Mã thiết bị đã tồn tại, hãy từ chối đề xuất này.');put('devices',{...r.data,holder:'Kho'})}
+ else{if(db.staff.some(s=>s.toLowerCase()===r.data.name.toLowerCase()))return alert('Cán bộ đã có trong danh sách.');put('staff',{id:'s'+Date.now().toString(36),name:r.data.name})}
+ rm('requests',id)}
+function rejectReq(id){const r=Object.values(S.requests).find(x=>x.id===id);if(r)put('requests',{...r,status:'rejected'})}
+function reqList(){const L=Object.values(S.requests).sort((a,b)=>b.time-a.time);
+ const row=r=>{const d=r.data,t=r.kind==='device'?`Thiết bị: <b>${E(d.id)} - ${E(d.name)}</b> (${E(d.type)}, ${E(d.serial)})`:`Cán bộ: <b>${E(d.name)}</b>`,p=r.status==='pending';
+  return `<div class="bg-white rounded-xl shadow-sm p-3"><div class="flex justify-between gap-2 text-sm"><div>${t}<div class="text-slate-500">${fmt(r.time)}</div></div><span class="px-2 py-0.5 h-fit rounded-full text-xs font-semibold ${p?'bg-amber-100 text-amber-800':'bg-red-100 text-red-800'}">${p?'Chờ duyệt':'Bị từ chối'}</span></div>${admin?`<div class="mt-2 flex gap-2">${p?`<button class="btn bg-emerald-600 text-white flex-1" onclick="approve('${r.id}')">Duyệt</button><button class="btn bg-red-50 text-red-700 flex-1" onclick="rejectReq('${r.id}')">Từ chối</button>`:`<button class="btn bg-slate-100 flex-1" onclick="rm('requests','${r.id}')">Xóa</button>`}</div>`:''}</div>`};
+ return `<h1 class="text-xl font-bold mb-1">Đề xuất chờ duyệt</h1><p class="text-sm text-slate-500 mb-3">${admin?'Bạn là admin: duyệt thì mục được đưa vào danh mục.':'Mục bạn đề xuất sẽ vào danh mục sau khi admin duyệt.'}</p><div class="grid md:grid-cols-2 gap-3">${L.map(row).join('')||'<p class="text-slate-500">Không có đề xuất nào.</p>'}</div>`}
+function giverOf(d){const t=[...db.transfers].reverse().find(t=>t.deviceId===d.id&&t.status==='Đã hoàn tất'&&t.to===d.holder);return t?t.from:'Kho'}
+function retForm(id){const d=dev(id),to=giverOf(d);
+ modal(`<h2 class="font-bold text-lg mb-3">Trả lại thiết bị</h2><p class="text-sm mb-3"><b>${E(d.name)}</b> (${E(d.serial)})<br>${E(d.holder)} → <b>${E(to)}</b> (người giao trước đó)</p><div class="mb-4 text-sm font-semibold">Ghi chú tình trạng khi trả<div class="mt-2 font-normal">${chips('r_note')}</div><textarea id="r_note" rows="3" class="inp font-normal" placeholder="Chọn gợi ý phía trên hoặc tự nhập…"></textarea></div><div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-blue-800 text-white flex-1" onclick="doRet('${d.id}')">Xác nhận trả lại</button></div>`)}
+function doRet(id){const d={...dev(id)},to=giverOf(d),n=document.getElementById('r_note').value.trim(),now=Date.now();
+ const t={id:'PGN'+String(now).slice(-6),deviceId:id,from:d.holder,to,time:now,doneAt:now,note:n||'Trả lại thiết bị',status:'Đã hoàn tất',kind:'return'};
+ closeM();put('transfers',t);put('holders',{id:id,holder:to})}
+const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=t=>new Date(t).toLocaleString('vi-VN');
+const dev=id=>db.devices.find(d=>d.id===id)||{name:'(đã xóa)',serial:'',id};
+function qr(code){let h=0,s='';for(const c of code)h=(h*31+c.charCodeAt(0))>>>0;const n=9;let r='';
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++){h=(h*1103515245+12345)>>>0;const f=(x<3&&y<3)||(x>5&&y<3)||(x<3&&y>5);if(f||(h>>16)&1)r+=`<rect x="${x}" y="${y}" width="1" height="1"/>`}
+ return `<svg viewBox="0 0 9 9" class="w-10 h-10 shrink-0" fill="#1e3a8a">${r}</svg>`}
+const badge=s=>`<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${{'Mới':'bg-sky-100 text-sky-800','Đang sử dụng':'bg-emerald-100 text-emerald-800','Cần bảo trì':'bg-amber-100 text-amber-800','Chờ xác nhận':'bg-amber-100 text-amber-800','Đã hoàn tất':'bg-emerald-100 text-emerald-800','Trả lại':'bg-violet-100 text-violet-800'}[s]}">${s}</span>`;
+function nav(){const h=TABS.map(t=>`<button onclick="go('${t[0]}')" class="px-4 h-11 rounded-lg text-left ${view===t[0]?'bg-white/20 font-bold':'hover:bg-white/10'}">${t[1]}</button>`).join('')+(me?'<button onclick="logout()" class="px-4 h-11 rounded-lg text-left hover:bg-white/10">Đăng xuất</button>':'');
+ document.getElementById('nav').innerHTML=h;document.getElementById('mnav').innerHTML=h}
+function go(v){view=v;q='';document.getElementById('mnav').classList.add('hidden');render()}
+function render(){nav();setTimeout(sync,0);document.getElementById('app').innerHTML={dash,dev:devices,tr:transfers,log:journal}[view]()}
+function card(l,v,c){return `<div class="bg-white rounded-xl p-4 shadow-sm border-l-4 ${c}"><div class="text-sm text-slate-500">${l}</div><div class="text-3xl font-bold">${v}</div></div>`}
+function dash(){const d=db.devices,out=d.filter(x=>x.holder!=='Kho').length;
+ const rec=ordered(db.transfers.slice(-6)).map(t=>`<div class="py-3 border-b last:border-0 flex justify-between gap-2"><div><b>${E(dev(t.deviceId).name)}</b><div class="text-sm text-slate-500">${E(t.from)} → ${E(t.to)} · ${fmt(t.time)}</div></div>${badge(t.status)}</div>`).join('')||'<p class="text-slate-500 py-3">Chưa có phiếu nào.</p>';
+ return `<h1 class="text-xl font-bold mb-3">Tổng quan</h1><div class="grid grid-cols-1 sm:grid-cols-3 gap-3">${card('Tổng số thiết bị',d.length,'border-blue-700')+card('Đang được giao/mượn',out,'border-amber-500')+card('Sẵn sàng trong kho',d.length-out,'border-emerald-500')}</div>
+ <div class="bg-white rounded-xl shadow-sm p-4 mt-4"><div class="flex flex-wrap items-center justify-between gap-2 mb-1"><h2 class="font-bold">Giao nhận gần đây</h2><div class="w-48">${sortSel()}</div></div>${rec}</div>`}
+function devices(){const tb=(k,l)=>`<button onclick="cat='${k}';q='';render()" class="btn flex-1 ${cat===k?'bg-blue-800 text-white':'bg-white text-slate-700 border'}">${l}</button>`;
+ const pn=Object.values(S.requests).filter(r=>r.status==='pending').length;
+ return `<div class="flex gap-2 mb-3 md:max-w-lg">${tb('dev','Thiết Bị')}${tb('staff','Cán Bộ')}${tb('req','Chờ duyệt'+(pn?' ('+pn+')':''))}${admin&&!noCloud?tb('acc','Tài khoản'):''}</div>`+(cat==='dev'?devList():cat==='staff'?staffList():cat==='acc'?accList():reqList())}
+function staffList(){const held=n=>db.devices.filter(d=>d.holder===n).length;
+ const L=db.staff.map((s,i)=>({s,i})).filter(o=>o.s.toLowerCase().includes(q.toLowerCase()));
+ const cards=L.map(o=>`<div class="bg-white rounded-xl shadow-sm p-3"><div class="flex justify-between gap-2"><b>${E(o.s)}</b><span class="text-sm text-slate-500">${held(o.s)} thiết bị</span></div><div class="mt-2 flex gap-2">${admin?`<button class="btn bg-slate-100 flex-1" onclick="staffForm(${o.i})">Sửa</button><button class="btn bg-red-50 text-red-700 flex-1" onclick="delStaff(${o.i})">Xóa</button>`:''}</div></div>`).join('')||'<p class="text-slate-500">Chưa có cán bộ.</p>';
+ const rows=L.map((o,n)=>`<tr class="border-t"><td class="p-3">${n+1}</td><td class="p-3 font-semibold">${E(o.s)}</td><td class="p-3">${held(o.s)}</td><td class="p-3 whitespace-nowrap">${admin?`<button class="text-blue-700 mr-3" onclick="staffForm(${o.i})">Sửa</button><button class="text-red-700" onclick="delStaff(${o.i})">Xóa</button>`:''}</td></tr>`).join('');
+ return `<div class="flex flex-wrap gap-2 items-center mb-3"><h1 class="text-xl font-bold flex-1">Danh sách cán bộ</h1><input class="inp md:w-72" placeholder="Tìm tên cán bộ…" value="${E(q)}" oninput="q=this.value;render();const i=document.querySelector('input.inp');i.focus();i.setSelectionRange(q.length,q.length)"><button class="btn bg-blue-800 text-white" onclick="staffForm()">${admin?'+ Thêm':'+ Đề xuất'}</button></div>
+ <div class="md:hidden space-y-3">${cards}</div><div class="hidden md:block bg-white rounded-xl shadow-sm overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-blue-50 text-blue-900"><tr><th class="p-3 w-16">STT</th><th class="p-3">Họ và tên</th><th class="p-3">Thiết bị đang giữ</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`}
+function devList(){const L=db.devices.filter(d=>(d.name+d.holder+d.id+d.serial).toLowerCase().includes(q.toLowerCase()));
+ const cards=L.map(d=>`<div class="bg-white rounded-xl shadow-sm p-3 flex gap-3">${qr(d.id)}<div class="flex-1 min-w-0"><div class="flex justify-between gap-2"><b>${E(d.name)}</b>${badge(d.status)}</div><div class="text-sm text-slate-500">${E(d.id)} · ${E(d.type)} · ${E(d.serial)}</div><div class="text-sm">Người giữ: <b>${E(d.holder)}</b></div><div class="mt-2 flex gap-2">${d.holder!=='Kho'?`<button class="btn bg-violet-100 text-violet-800 flex-1" onclick="retForm('${d.id}')">Trả lại</button>`:''}${admin?`<button class="btn bg-slate-100 flex-1" onclick="devForm('${d.id}')">Sửa</button><button class="btn bg-red-50 text-red-700 flex-1" onclick="delDev('${d.id}')">Xóa</button>`:''}</div></div></div>`).join('');
+ const rows=L.map(d=>`<tr class="border-t"><td class="p-3">${qr(d.id)}</td><td class="p-3">${E(d.id)}</td><td class="p-3 font-semibold">${E(d.name)}</td><td class="p-3">${E(d.type)}</td><td class="p-3">${E(d.serial)}</td><td class="p-3">${badge(d.status)}</td><td class="p-3">${E(d.holder)}</td><td class="p-3 whitespace-nowrap">${d.holder!=='Kho'?`<button class="text-violet-700 mr-3" onclick="retForm('${d.id}')">Trả lại</button>`:''}${admin?`<button class="text-blue-700 mr-3" onclick="devForm('${d.id}')">Sửa</button><button class="text-red-700" onclick="delDev('${d.id}')">Xóa</button>`:''}</td></tr>`).join('');
+ return `<div class="flex flex-wrap gap-2 items-center mb-3"><h1 class="text-xl font-bold flex-1">Danh sách thiết bị</h1><input class="inp md:w-72" placeholder="Tìm tên thiết bị, người giữ…" value="${E(q)}" oninput="q=this.value;render();const i=document.querySelector('input.inp');i.focus();i.setSelectionRange(q.length,q.length)"><button class="btn bg-blue-800 text-white" onclick="devForm()">${admin?'+ Thêm':'+ Đề xuất'}</button></div>
+ <div class="md:hidden space-y-3">${cards}</div><div class="hidden md:block bg-white rounded-xl shadow-sm overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-blue-50 text-blue-900"><tr><th class="p-3">QR</th><th class="p-3">Mã</th><th class="p-3">Tên</th><th class="p-3">Chủng loại</th><th class="p-3">Serial</th><th class="p-3">Tình trạng</th><th class="p-3">Người giữ</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`}
+function modal(h){const m=document.getElementById('modal');document.getElementById('mbox').innerHTML=h;m.classList.remove('hidden');m.classList.add('flex')}
+function closeM(){const m=document.getElementById('modal');m.classList.add('hidden');m.classList.remove('flex')}
+function devForm(id){const d=db.devices.find(x=>x.id===id)||{id:'TB'+String(db.devices.length+1+Math.floor(Math.random()*90)).padStart(3,'0'),name:'',type:'',serial:'',status:'Mới',holder:'Kho'};
+ const f=(k,l)=>`<label class="block mb-3 text-sm font-semibold">${l}<input id="f_${k}" class="inp mt-1 font-normal" value="${E(d[k])}"></label>`;
+ modal(`<h2 class="font-bold text-lg mb-3">${id?'Sửa':'Thêm'} thiết bị</h2>${f('id','Mã thiết bị')}${f('name','Tên thiết bị')}${f('type','Chủng loại')}${f('serial','Số serial')}<label class="block mb-4 text-sm font-semibold">Tình trạng<select id="f_status" class="inp mt-1 font-normal">${ST.map(s=>`<option ${s===d.status?'selected':''}>${s}</option>`).join('')}</select></label><div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-blue-800 text-white flex-1" onclick="saveDev('${id||''}')">${admin?'Lưu':'Gửi đề xuất'}</button></div>`)}
+function saveDev(old){const v=k=>document.getElementById('f_'+k).value.trim();if(!v('id')||!v('name'))return alert('Nhập mã và tên thiết bị');
+ if(v('id')!==old&&db.devices.some(d=>d.id===v('id')))return alert('Mã thiết bị đã tồn tại');
+ const o=db.devices.find(d=>d.id===old);const n={id:v('id'),name:v('name'),type:v('type'),serial:v('serial'),status:v('status'),holder:o?o.holder:'Kho'};
+ if(!admin)return reqAdd('device',n);if(o&&old!==n.id)rm('devices',old);closeM();put('devices',n)}
+function staffForm(i){const v=i===undefined?'':db.staff[i];
+ modal(`<h2 class="font-bold text-lg mb-3">${i===undefined?'Thêm':'Sửa'} cán bộ</h2><label class="block mb-4 text-sm font-semibold">Họ và tên<input id="s_name" class="inp mt-1 font-normal" value="${E(v)}"></label><div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-blue-800 text-white flex-1" onclick="saveStaff(${i===undefined?-1:i})">${admin?'Lưu':'Gửi đề xuất'}</button></div>`)}
+function saveStaff(i){const n=document.getElementById('s_name').value.trim();
+ if(!n)return alert('Nhập họ tên cán bộ');if(n.toLowerCase()==='kho')return alert('Tên "Kho" được dùng cho kho thiết bị');
+ if(db.staff.some((s,j)=>j!==i&&s.toLowerCase()===n.toLowerCase()))return alert('Cán bộ này đã có trong danh sách');
+ if(!admin)return reqAdd('staff',{name:n});if(i>=0){const so=db.staffObjs[i],o=so.name;db.devices.forEach(d=>{if(d.holder===o)put('holders',{id:d.id,holder:n})});db.transfers.forEach(t=>{if(t.from===o||t.to===o)put('transfers',{...t,from:t.from===o?n:t.from,to:t.to===o?n:t.to})});if(jf.who===o)jf.who=n;put('staff',{...so,name:n})}else put('staff',{id:'s'+Date.now().toString(36),name:n});
+ closeM()}
+function delStaff(i){const s=db.staff[i],c=db.devices.filter(d=>d.holder===s).length;
+ if(c)return alert(s+' đang giữ '+c+' thiết bị. Hãy bàn giao về kho trước khi xóa.');
+ if(confirm('Xóa cán bộ '+s+'? Lịch sử giao nhận cũ vẫn được giữ.')){rm('staff',db.staffObjs[i].id);if(jf.who===s)jf.who=''}}
+function delDev(id){if(confirm('Xóa thiết bị '+id+'?')){rm('devices',id)}}
+function transfers(){const cards=[...db.transfers].reverse().map(t=>`<div class="bg-white rounded-xl shadow-sm p-3"><div class="flex justify-between gap-2"><b>${E(dev(t.deviceId).name)}</b>${badge(t.status)}</div><div class="text-sm text-slate-500">${E(t.from)} → ${E(t.to)}<br>${fmt(t.time)}</div><div class="mt-2 flex flex-wrap gap-2">${t.status==='Chờ xác nhận'?`<button class="btn bg-blue-800 text-white flex-1" onclick="zalo('${t.id}')">Xác nhận qua Zalo</button>`:''}${t.status==='Đã hoàn tất'&&dev(t.deviceId).holder===t.to?`<button class="btn bg-violet-100 text-violet-800 flex-1" onclick="retForm('${t.deviceId}')">Trả lại</button>`:''}<button class="btn bg-slate-100 flex-1" onclick="pdfOne('${t.id}')">Xuất PDF</button></div></div>`).join('')||'<p class="text-slate-500">Chưa có phiếu.</p>';
+ return `<div class="flex justify-between items-center mb-3"><h1 class="text-xl font-bold">Phiếu giao nhận</h1><button class="btn bg-blue-800 text-white" onclick="trForm()">+ Tạo phiếu</button></div><div class="grid md:grid-cols-2 gap-3">${cards}</div>`}
+function trForm(){const opt=a=>a.map(x=>`<option>${E(x)}</option>`).join('');
+ modal(`<h2 class="font-bold text-lg mb-3">Tạo phiếu giao nhận</h2>
+ <label class="block mb-3 text-sm font-semibold">Thiết bị<select id="t_dev" class="inp mt-1 font-normal" onchange="document.getElementById('t_from').value=dev(this.value).holder||'Kho'">${db.devices.map(d=>`<option value="${d.id}">${E(d.id)} - ${E(d.name)}</option>`).join('')}</select></label>
+ <label class="block mb-3 text-sm font-semibold">Cán bộ giao<select id="t_from" class="inp mt-1 font-normal"><option>Kho</option>${opt(db.staff)}</select></label>
+ <label class="block mb-3 text-sm font-semibold">Cán bộ nhận<select id="t_to" class="inp mt-1 font-normal">${opt(db.staff)}<option>Kho</option></select></label>
+ <label class="block mb-3 text-sm font-semibold">Thời gian giao<input class="inp mt-1 font-normal bg-slate-50" readonly value="${fmt(Date.now())}"></label>
+ <div class="mb-4 text-sm font-semibold">Ghi chú tình trạng<div class="mt-2 font-normal">${chips('t_note')}</div><textarea id="t_note" rows="3" class="inp font-normal" placeholder="Chọn gợi ý phía trên hoặc tự nhập…"></textarea></div>
+ <div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-blue-800 text-white flex-1" onclick="saveTr()">Tạo phiếu</button></div>`);
+ document.getElementById('t_from').value=dev(db.devices[0]?.id).holder||'Kho'}
+function saveTr(){const g=k=>document.getElementById(k).value;if(!g('t_dev'))return alert('Chưa có thiết bị');if(g('t_from')===g('t_to'))return alert('Bên giao và bên nhận phải khác nhau');
+ const t={id:'PGN'+Date.now().toString().slice(-6),deviceId:g('t_dev'),from:g('t_from'),to:g('t_to'),time:Date.now(),note:g('t_note'),status:'Chờ xác nhận',token:Math.random().toString(36).slice(2,12)};
+ put('transfers',t);zalo(t.id)}
+function zalo(id){const t=db.transfers.find(x=>x.id===id),link='https://app.domain.vn/verify?token='+t.token;
+ modal(`<h2 class="font-bold text-lg mb-2">Gửi xác nhận qua Zalo OA/ZNS</h2><p class="text-sm text-slate-500 mb-2">Tin nhắn mẫu gửi tới <b>${E(t.to)}</b>:</p>
+ <div class="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm mb-3">Kính gửi ${E(t.to)},<br>${E(t.from)} bàn giao cho đồng chí thiết bị <b>${E(dev(t.deviceId).name)}</b> (${E(dev(t.deviceId).serial)}) lúc ${fmt(t.time)}.<br>Vui lòng bấm vào liên kết để xác nhận đã nhận:<br><a class="text-blue-700 underline break-all">${link}</a></div>
+ <p class="text-xs text-slate-500 mb-3">Đây là mô phỏng. Khi triển khai thật, backend gọi API Zalo ZNS và xác thực token.</p>
+ <div class="flex gap-2 flex-col sm:flex-row"><button class="btn bg-slate-100 flex-1" onclick="closeM();render()">Đóng</button>${t.status==='Đã hoàn tất'?'':`<button class="btn bg-emerald-600 text-white flex-1" onclick="confirmTr('${t.id}')">Giả lập: cán bộ nhận bấm xác nhận</button>`}</div>`);render()}
+function confirmTr(id){const t={...db.transfers.find(x=>x.id===id),status:'Đã hoàn tất',doneAt:Date.now()},d0=db.devices.find(x=>x.id===t.deviceId),d=d0&&{...d0};
+ closeM();put('transfers',t);if(d)put('holders',{id:d.id,holder:t.to})}
+let jf={from:'',to:'',who:''};
+function jList(){return db.transfers.filter(t=>(!jf.from||t.time>=new Date(jf.from).getTime())&&(!jf.to||t.time<=new Date(jf.to).getTime()+864e5-1)&&(!jf.who||t.from===jf.who||t.to===jf.who))}
+function journal(){const L=ordered(jList());
+ const rows=L.map(t=>`<tr class="border-t"><td class="p-3">${fmt(t.time)}</td><td class="p-3">${E(dev(t.deviceId).name)}</td><td class="p-3">${E(t.from)}</td><td class="p-3">${E(t.to)}</td><td class="p-3">${E(t.note)}</td><td class="p-3">${badge(t.status)}</td></tr>`).join('');
+ const cards=L.map(t=>`<div class="bg-white rounded-xl shadow-sm p-3 text-sm"><div class="flex justify-between"><b>${E(dev(t.deviceId).name)}</b>${badge(t.status)}</div>${E(t.from)} → ${E(t.to)}<div class="text-slate-500">${fmt(t.time)}</div></div>`).join('');
+ return `<h1 class="text-xl font-bold mb-3">Nhật ký giao nhận</h1><div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3">
+ <input type="date" class="inp" value="${jf.from}" onchange="jf.from=this.value;render()"><input type="date" class="inp" value="${jf.to}" onchange="jf.to=this.value;render()">
+ <select class="inp" onchange="jf.who=this.value;render()"><option value="">Tất cả cá nhân</option>${db.staff.map(s=>`<option ${s===jf.who?'selected':''}>${E(s)}</option>`).join('')}</select>${sortSel()}<button class="btn bg-blue-800 text-white" onclick="pdfLog()">Xuất sổ nhật ký PDF</button></div>
+ <div class="md:hidden space-y-3">${cards}</div><div class="hidden md:block bg-white rounded-xl shadow-sm overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-blue-50 text-blue-900"><tr><th class="p-3">Thời gian</th><th class="p-3">Thiết bị</th><th class="p-3">Bên giao</th><th class="p-3">Bên nhận</th><th class="p-3">Ghi chú</th><th class="p-3">Trạng thái</th></tr></thead><tbody>${rows}</tbody></table></div>`}
+const HEAD='<div style="text-align:center;font-weight:bold">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<br><u>Độc lập - Tự do - Hạnh phúc</u></div>';
+const TBL='style="width:100%;border-collapse:collapse;font-size:13px"',TD='style="border:1px solid #000;padding:5px"';
+function makePdf(html,name){const r=document.getElementById('pdfroot');r.innerHTML=`<div style="padding:30px;font-family:'Times New Roman',serif;font-size:14px;color:#000">${html}</div>`;
+ const {jsPDF}=window.jspdf,doc=new jsPDF({unit:'pt',format:'a4'});
+ doc.html(r,{x:0,y:0,width:595,windowWidth:800,callback:d=>{d.save(name);r.innerHTML=''}})}
+function pdfOne(id){const t=db.transfers.find(x=>x.id===id),d=dev(t.deviceId);
+ makePdf(`${HEAD}<h2 style="text-align:center;margin:24px 0 4px">${t.kind==='return'?'BIÊN BẢN TRẢ LẠI THIẾT BỊ':'BIÊN BẢN BÀN GIAO THIẾT BỊ'}</h2><p style="text-align:center">Số: ${t.id}</p>
+ <p>Hôm nay, lúc ${fmt(t.time)}, hai bên tiến hành bàn giao thiết bị như sau:</p>
+ <p><b>I. BÊN GIAO:</b> ${E(t.from)}</p><p><b>II. BÊN NHẬN:</b> ${E(t.to)}</p><p><b>III. DANH SÁCH THIẾT BỊ:</b></p>
+ <table ${TBL}><tr style="font-weight:bold"><td ${TD}>STT</td><td ${TD}>Mã</td><td ${TD}>Tên thiết bị</td><td ${TD}>Số serial</td><td ${TD}>Tình trạng khi giao</td></tr><tr><td ${TD}>1</td><td ${TD}>${E(d.id)}</td><td ${TD}>${E(d.name)}</td><td ${TD}>${E(d.serial)}</td><td ${TD}>${E(t.note)||'Bình thường'}</td></tr></table>
+ <p>Trạng thái: <b>${t.status}</b>${t.doneAt?' (xác nhận lúc '+fmt(t.doneAt)+')':''}. Biên bản lập thành 02 bản, mỗi bên giữ 01 bản.</p>
+ <table style="width:100%;text-align:center;margin-top:20px"><tr><td><b>BÊN GIAO</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${E(t.from)}</td><td><b>BÊN NHẬN</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${t.status==='Đã hoàn tất'?'<span style="color:#047857">✔ Đã xác nhận qua Zalo<br></span>':''}${E(t.to)}</td></tr></table>`,t.id+'.pdf')}
+function pdfLog(){const L=ordered(jList());const sub=[jf.from&&'từ '+jf.from,jf.to&&'đến '+jf.to,jf.who&&'cá nhân: '+jf.who].filter(Boolean).join(' · ')||'Toàn bộ';
+ makePdf(`${HEAD}<h2 style="text-align:center;margin:24px 0 4px">SỔ NHẬT KÝ GIAO NHẬN THIẾT BỊ</h2><p style="text-align:center">${E(sub)}</p>
+ <table ${TBL}><tr style="font-weight:bold"><td ${TD}>STT</td><td ${TD}>Thời gian</td><td ${TD}>Thiết bị</td><td ${TD}>Giao</td><td ${TD}>Nhận</td><td ${TD}>Trạng thái</td></tr>${L.map((t,i)=>`<tr><td ${TD}>${i+1}</td><td ${TD}>${fmt(t.time)}</td><td ${TD}>${E(dev(t.deviceId).name)}</td><td ${TD}>${E(t.from)}</td><td ${TD}>${E(t.to)}</td><td ${TD}>${t.status}</td></tr>`).join('')}</table><p>Tổng cộng: ${L.length} phiếu.</p>`,'so-nhat-ky.pdf')}
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+initData();render();
+</script></body></html>
