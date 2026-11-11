@@ -4,10 +4,8 @@
 <link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#1e3a8a">
 <link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="QL Thiết Bị">
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="drive-config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <title>Quản Lý Thiết Bị</title>
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
@@ -34,45 +32,103 @@ let view='dash',q='',db,cat='dev';
 const COLS=['devices','staff','transfers','holders','requests'],key=s=>String(s).replace(/[^A-Za-z0-9_-]/g,c=>'~'+c.charCodeAt(0).toString(16)+'~');
 let S={devices:{},staff:{},transfers:{},holders:{},requests:{}},Q=[],cloud=null,noCloud=false,live=false,busy=false,admin=false;
 function derive(){const A=c=>Object.values(S[c]);db={devices:A('devices').map(d=>{const h=(S.holders[key(d.id)]||{holder:d.holder}).holder||'Kho';return{...d,holder:h,status:d.status==='Mới'&&h!=='Kho'?'Đang sử dụng':d.status}}).sort((a,b)=>a.id.localeCompare(b.id)),staffObjs:A('staff').sort((a,b)=>a.name.localeCompare(b.name,'vi')),transfers:A('transfers').sort((a,b)=>a.time-b.time).map(t=>t.kind==='return'?{...t,status:'Trả lại'}:t)};db.staff=db.staffObjs.map(s=>s.name)}
-function persist(){try{localStorage.setItem('gn_v2',JSON.stringify({S,Q}))}catch(e){}}
+function persist(){if(noCloud){try{localStorage.setItem('gn_v2',JSON.stringify({S,Q}))}catch(e){}return}if(KEY)encObj({S,Q}).then(w=>{try{localStorage.setItem('gn_v3',JSON.stringify(w))}catch(e){}}).catch(()=>{})}
 function put(c,o){S[c][key(o.id)]=o;Q.push({op:'set',c,id:o.id,data:o});changed()}
 function rm(c,id){delete S[c][key(id)];Q.push({op:'del',c,id});changed()}
 function changed(){derive();persist();flush();render()}
-async function flush(){if(!cloud||busy||!navigator.onLine)return;busy=true;
- try{while(Q.length){const q=Q[0],r=cloud.doc(q.c+'/'+key(q.id));if(q.op==='set')await r.set(JSON.parse(JSON.stringify(q.data)));else await r.delete();Q.shift();persist()}}catch(e){}
- busy=false;sync()}
+function flush(){setTimeout(sync1,50)}
 function sync(){const e=document.getElementById('st');if(!e)return;const n=Q.length;
- e.textContent=noCloud?'Chỉ lưu trên máy này':!navigator.onLine?'○ Ngoại tuyến'+(n?' · '+n+' thay đổi chờ gửi':''):!live?'◌ Đang kết nối…'+(n?' · '+n+' chờ gửi':''):n?'● Đang gửi '+n+' thay đổi…':'● Đã đồng bộ'}
+ e.onclick=needAuth()?signIn:null;e.textContent=needAuth()?'⚠ Phiên Google hết hạn - chạm vào đây để đăng nhập lại':noCloud?'Chỉ lưu trên máy này':!navigator.onLine?'○ Ngoại tuyến'+(n?' · '+n+' thay đổi chờ gửi':''):!live?'◌ Đang kết nối…'+(n?' · '+n+' chờ gửi':''):n?'● Đang gửi '+n+' thay đổi…':'● Đã đồng bộ'}
 let prof=null,pc=null,pcShown=false,got={},regPhone='';try{const c=new URLSearchParams(location.search).get('c');if(c){const p=c.split('.');pc={id:p[0],tk:p[1]}}}catch(e){}
 const base=()=>location.origin+location.pathname,mailOf=v=>v.includes('@')?v:v.replace(/\D/g,'')+'@qltb.vn';
-let fs,auth,me=null,role='',accounts=[],regName='',roleUnsub=null,unsubs=[],dataOn=false;
+let CFG=null,me=null,role='',tok='',tokExp=0,tc=null,perms=[],lastMod={};
+const needAuth=()=>!!(CFG&&me&&(!tok||Date.now()>tokExp)),J={'Content-Type':'application/json'},DRV='https://www.googleapis.com/drive/v3/files/';
+const FILES=()=>[[CFG.catalogId,['devices','staff']],[CFG.activityId,['holders','transfers','requests']]];
+let KEY=null,SALT='',afterKey=null,needCreate=false;
+const te=new TextEncoder(),td=new TextDecoder();
+const b64=a=>{let s='';for(const x of new Uint8Array(a))s+=String.fromCharCode(x);return btoa(s)},ub=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)),newSalt=()=>b64(crypto.getRandomValues(new Uint8Array(16)));
+async function kdf(pass,salt){const km=await crypto.subtle.importKey('raw',te.encode(pass),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt:ub(salt),iterations:300000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['encrypt','decrypt'])}
+async function encObj(o){const iv=crypto.getRandomValues(new Uint8Array(12));return{v:1,salt:SALT,iv:b64(iv),ct:b64(await crypto.subtle.encrypt({name:'AES-GCM',iv},KEY,te.encode(JSON.stringify(o))))}}
+async function decObj(w){if(!w||!w.ct)return w||{};if(!KEY)throw new Error('LOCKED');try{return JSON.parse(td.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:ub(w.iv)},KEY,ub(w.ct))))}catch(e){throw new Error('BADKEY')}}
+const idb=()=>new Promise((res,rej)=>{const r=indexedDB.open('qltb',1);r.onupgradeneeded=()=>r.result.createObjectStore('k');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const idbPut=async(k,v)=>{const d=await idb();return new Promise((res,rej)=>{const t=d.transaction('k','readwrite');t.objectStore('k').put(v,k);t.oncomplete=res;t.onerror=()=>rej(t.error)})};
+const idbGet=async k=>{const d=await idb();return new Promise((res,rej)=>{const q=d.transaction('k').objectStore('k').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})};
+const idbDel=async k=>{const d=await idb();return new Promise(res=>{const t=d.transaction('k','readwrite');t.objectStore('k').delete(k);t.oncomplete=res;t.onerror=res})};
+async function loadLocal(){try{const c=localStorage.getItem('gn_v3');if(!c)return;const x=await decObj(JSON.parse(c));S={...S,...x.S};Q=x.Q||[];derive()}catch(e){}}
+function askKey(msg){const mk=needCreate&&admin;showGate(LOGO+`<p class="text-sm text-slate-500 mb-3">${mk?'Tạo <b>mật khẩu mã hóa</b> cho kho dữ liệu (từ 8 ký tự). Chia sẻ mật khẩu này cho cán bộ qua kênh an toàn. <b>Mất mật khẩu thì không thể khôi phục dữ liệu.</b>':'Nhập <b>mật khẩu mã hóa</b> do admin cung cấp. Mật khẩu không được gửi đi đâu.'}</p>${msg?`<p class="text-sm text-red-600 mb-2">${E(msg)}</p>`:''}<input id="k_pw" type="password" class="inp mb-2" placeholder="Mật khẩu mã hóa">${mk?'<input id="k_pw2" type="password" class="inp mb-2" placeholder="Nhập lại mật khẩu">':''}<label class="flex items-center gap-2 text-sm mb-4"><input id="k_rem" type="checkbox"> Ghi nhớ trên thiết bị này</label><button class="btn bg-blue-800 text-white w-full mb-2" onclick="tryKey()">${mk?'Tạo và mở khóa':'Mở khóa'}</button><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>`)}
+async function tryKey(){const p=document.getElementById('k_pw').value,mk=needCreate&&admin;if(!p)return;
+ if(mk){if(p.length<8)return askKey('Mật khẩu tối thiểu 8 ký tự');if(p!==document.getElementById('k_pw2').value)return askKey('Hai mật khẩu không khớp')}
+ const rem=document.getElementById('k_rem').checked;
+ try{let salt=localStorage.getItem('gn_salt')||SALT,w=null;
+  if(tok&&navigator.onLine){w=await gapi(DRV+CFG.catalogId+'?alt=media');if(w&&w.salt)salt=w.salt}
+  if(!salt){if(!mk)return askKey(navigator.onLine?'Kho dữ liệu chưa được mã hóa. Nhờ admin mở app và tạo mật khẩu trước.':'Cần kết nối mạng để mở khóa lần đầu.');salt=newSalt()}
+  KEY=await kdf(p,salt);SALT=salt;
+  if(w&&w.ct)await decObj(w);else if(!w){const c=localStorage.getItem('gn_v3');if(c)await decObj(JSON.parse(c))}
+  localStorage.setItem('gn_salt',salt);if(rem)await idbPut('k',KEY);else await idbDel('k');
+  await loadLocal();needCreate=false;const f=afterKey;afterKey=null;f&&f()}
+ catch(e){KEY=null;askKey('Sai mật khẩu mã hóa')}}
+async function changeKey(){const p=prompt('Mật khẩu mã hóa MỚI (từ 8 ký tự):');if(!p)return;if(p.length<8)return alert('Tối thiểu 8 ký tự');if(prompt('Nhập lại mật khẩu mới:')!==p)return alert('Hai mật khẩu không khớp');
+ await sync1();try{const salt=newSalt();KEY=await kdf(p,salt);SALT=salt;localStorage.setItem('gn_salt',salt);try{await idbDel('k')}catch(e){}
+  for(const [fid,cols] of FILES()){const o={};cols.forEach(c=>o[c]=S[c]||{});await gapi('https://www.googleapis.com/upload/drive/v3/files/'+fid+'?uploadType=media',{method:'PATCH',headers:J,body:JSON.stringify(await encObj(o))})}
+  lastMod={};persist();alert('Đã đổi mật khẩu. Các cán bộ khác sẽ được yêu cầu nhập mật khẩu mới.')}catch(e){alert('Đổi mật khẩu thất bại: '+e.message)}}
 function showGate(x){const g=document.getElementById('gate');document.getElementById('gbox').innerHTML=x;g.classList.remove('hidden');g.classList.add('flex')}
 function hideGate(){const g=document.getElementById('gate');g.classList.add('hidden');g.classList.remove('flex')}
 const gv=k=>document.getElementById(k).value.trim(),LOGO='<h1 class="text-xl font-bold text-blue-900 mb-1">★ Quản Lý Thiết Bị</h1>';
-function showLogin(msg){showGate(LOGO+`<p class="text-sm text-slate-500 mb-4">Đăng nhập để tiếp tục</p>${msg?`<p class="text-sm text-red-600 mb-3">${E(msg)}</p>`:''}<input id="g_name" class="inp mb-2" placeholder="Họ tên (chỉ khi đăng ký)"><input id="g_mail" inputmode="tel" class="inp mb-2" placeholder="Số điện thoại (Zalo)"><input id="g_pw" type="password" class="inp mb-4" placeholder="Mật khẩu (từ 6 ký tự)"><button class="btn bg-blue-800 text-white w-full mb-2" onclick="doLogin()">Đăng nhập</button><button class="btn bg-slate-100 w-full" onclick="doReg()">Đăng ký tài khoản mới</button>`)}
-function showWait(t){showGate(LOGO+`<p class="my-4">${t}</p><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>`)}
-function doLogin(){auth.signInWithEmailAndPassword(mailOf(gv('g_mail')),document.getElementById('g_pw').value).catch(()=>showLogin('Sai số điện thoại hoặc mật khẩu'))}
-function doReg(){const n=gv('g_name');if(!n)return alert('Nhập họ tên');const v=gv('g_mail');if(!v.includes('@')&&!/^0\d{9,10}$/.test(v.replace(/\D/g,'')))return alert('Nhập số điện thoại 10 số, ví dụ 0912345678');regName=n;regPhone=v.includes('@')?'':v.replace(/\D/g,'');auth.createUserWithEmailAndPassword(mailOf(v),document.getElementById('g_pw').value).catch(e=>showLogin(e.code==='auth/email-already-in-use'?'Số điện thoại này đã đăng ký':'Không đăng ký được: '+e.code))}
-function logout(){const go=()=>{try{localStorage.removeItem('gn_v2');localStorage.removeItem('gn_admin')}catch(e){}S={devices:{},staff:{},transfers:{},holders:{},requests:{}};Q=[];derive();auth.signOut()};
- if(Q.length)ask('Còn '+Q.length+' thay đổi chưa gửi lên máy chủ. Đăng xuất sẽ làm mất.',go,'Đăng xuất');else go()}
-function stopData(){got={};unsubs.forEach(f=>f());unsubs=[];dataOn=false;live=false;cloud=null}
-function startData(){if(dataOn)return;dataOn=true;cloud={doc:p=>fs.doc(p)};
- COLS.forEach(c=>unsubs.push(fs.collection(c).onSnapshot(s=>{if(s.metadata.fromCache)return;const n={};s.docs.forEach(x=>{n[x.id]={...x.data()}});
-  Q.forEach(q=>{if(q.c===c){if(q.op==='set')n[key(q.id)]=q.data;else delete n[key(q.id)]}});S[c]=n;live=true;got[c]=1;derive();persist();render();flush();checkConfirm()},()=>{live=false;sync()})));
- if(admin)unsubs.push(fs.collection('users').onSnapshot(s=>{accounts=s.docs.map(x=>({uid:x.id,...x.data()}));if(cat==='acc')render()},()=>{}));flush()}
-function watchRole(u){if(roleUnsub)roleUnsub();roleUnsub=fs.doc('users/'+u.uid).onSnapshot(s=>{
- if(!s.exists){if(!s.metadata.fromCache)fs.doc('users/'+u.uid).set({name:regName||u.displayName||u.email,email:u.email,phone:regPhone||(/@qltb\.vn$/.test(u.email)?u.email.split('@')[0]:''),role:'pending',time:Date.now()}).catch(()=>{});return}
- prof=s.data();role=prof.role;admin=role==='admin';try{localStorage.setItem('gn_admin',admin?'1':'0')}catch(e){}
- if(admin||role==='user'){hideGate();startData();render()}else{stopData();showWait(role==='off'?'Tài khoản đã bị khóa.':'Tài khoản đang chờ admin duyệt. Vui lòng quay lại sau.')}},()=>{})}
-function startCloud(){const C=window.FIREBASE_CONFIG;if(!window.firebase||!C||!C.apiKey||/DAN_VAO/.test(C.apiKey)){noCloud=true;admin=true;return sync()}
- showGate('<p class="text-center py-6">Đang tải…</p>');
- firebase.initializeApp(C);auth=firebase.auth();fs=firebase.firestore();fs.enablePersistence({synchronizeTabs:true}).catch(()=>{});
- auth.onAuthStateChanged(u=>{me=u;if(!u){stopData();if(roleUnsub)roleUnsub();admin=false;showLogin();render();return}watchRole(u);render()})}
-function accList(){const R=[['pending','Chờ duyệt'],['user','Người dùng'],['admin','Admin'],['off','Khóa']];
- return `<h1 class="text-xl font-bold mb-1">Tài khoản</h1><p class="text-sm text-slate-500 mb-3">Người mới đăng ký ở trạng thái "Chờ duyệt". Chọn quyền để cho phép sử dụng.</p><div class="grid md:grid-cols-2 gap-3">${accounts.map(a=>`<div class="bg-white rounded-xl shadow-sm p-3"><b>${E(a.name)}</b><div class="text-sm text-slate-500 mb-2">${E(a.phone||a.email)}</div><select class="inp" ${me&&a.uid===me.uid?'disabled':''} onchange="setRole('${a.uid}',this.value)">${R.map(r=>`<option value="${r[0]}" ${a.role===r[0]?'selected':''}>${r[1]}</option>`).join('')}</select></div>`).join('')}</div>`}
-function setRole(uid,r){fs.doc('users/'+uid).update({role:r}).catch(()=>alert('Không đổi được quyền'))}
-function initData(){try{const x=JSON.parse(localStorage.getItem('gn_v2'));if(x&&x.S){S={...S,...x.S};Q=x.Q||[]}admin=localStorage.getItem('gn_admin')==='1'}catch(e){}derive();startCloud()}
-addEventListener('online',()=>{flush();sync()});addEventListener('offline',()=>{live=false;sync()});setInterval(flush,15000);
+function showLogin(msg){showGate(LOGO+`<p class="text-sm text-slate-500 mb-4">Đăng nhập bằng tài khoản Google (Gmail) để dùng chung dữ liệu lưu trên Google Drive.</p>${msg?`<p class="text-sm text-red-600 mb-3">${E(msg)}</p>`:''}<button class="btn bg-blue-800 text-white w-full" onclick="signIn()">Đăng nhập bằng Google</button>`)}
+function showWait(t){showGate(LOGO+`<p class="my-4 text-sm">${t}</p><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>`)}
+function signIn(){if(!window.google)return alert('Chưa tải được dịch vụ Google. Kiểm tra kết nối mạng rồi thử lại.');
+ tc=tc||google.accounts.oauth2.initTokenClient({client_id:CFG.clientId,scope:'openid email profile https://www.googleapis.com/auth/drive',callback:r=>{if(r.error)return showLogin('Không đăng nhập được: '+r.error);tok=r.access_token;tokExp=Date.now()+(r.expires_in-60)*1000;afterTok()}});
+ tc.requestAccessToken(me?{prompt:'',hint:me.email}:{prompt:'select_account'})}
+async function gapi(url,o={}){if(!tok)throw new Error('no token');o.headers={Authorization:'Bearer '+tok,...(o.headers||{})};o.cache='no-store';const r=await fetch(url,o);
+ if(r.status===401){tok='';sync();throw new Error('401')}if(!r.ok){const e=new Error(r.status+' '+(await r.text()).slice(0,100));e.status=r.status;throw e}
+ const t=await r.text();if(!t)return{};try{return JSON.parse(t)}catch(e){return{}}}
+async function afterTok(){try{const u=await gapi('https://www.googleapis.com/oauth2/v3/userinfo');me={uid:u.sub,email:u.email};prof={name:u.name||u.email,email:u.email,phone:''};
+  if(!CFG.catalogId||!CFG.activityId)return showSetup();
+  let m;try{m=await gapi(DRV+CFG.catalogId+'?fields=capabilities(canEdit)')}catch(e){if(e.status===404||e.status===403)return showWait('Tài khoản <b>'+E(u.email)+'</b> chưa được cấp quyền truy cập dữ liệu. Hãy gửi Gmail này cho admin để được cấp quyền.');throw e}
+  admin=!!(m.capabilities&&m.capabilities.canEdit);role=admin?'admin':'user';
+  try{localStorage.setItem('gn_admin',admin?'1':'0');localStorage.setItem('gn_prof',JSON.stringify({me,prof}))}catch(e){}
+  const go=()=>{hideGate();render();sync1();if(admin)loadAccounts()};if(KEY)return go();
+  const w=await gapi(DRV+CFG.catalogId+'?alt=media');needCreate=!(w&&w.ct&&w.salt);afterKey=go;askKey()}catch(e){showLogin('Không đăng nhập được: '+(e.message||e))}}
+function showSetup(){showGate(LOGO+`<p class="my-3 text-sm">Chưa có kho dữ liệu. Bấm nút để tạo 2 tệp trên Google Drive của bạn (bạn là admin). Sau đó chép 2 mã hiển thị vào file <b>drive-config.js</b> rồi tải lại lên GitHub.</p><button class="btn bg-blue-800 text-white w-full" onclick="mkStore()">Tạo kho dữ liệu trên Drive</button>`)}
+async function mkStore(){try{const mk=async n=>{const f=await gapi(DRV.slice(0,-1),{method:'POST',headers:J,body:JSON.stringify({name:n,mimeType:'application/json'})});
+   await gapi('https://www.googleapis.com/upload/drive/v3/files/'+f.id+'?uploadType=media',{method:'PATCH',headers:J,body:'{}'});return f.id};
+  const a=await mk('QLTB-danh-muc.json'),b=await mk('QLTB-giao-nhan.json');
+  showGate(LOGO+`<p class="my-3 text-sm">Đã tạo xong. Dán 2 dòng này vào <b>drive-config.js</b>:</p><pre class="text-xs bg-slate-100 p-2 rounded break-all whitespace-pre-wrap">catalogId:"${a}",\nactivityId:"${b}",</pre><p class="text-xs text-slate-500 mt-2">Tải file lên GitHub, rồi mở lại app.</p>`)}catch(e){alert('Lỗi tạo kho: '+e.message)}}
+function logout(){if(Q.length&&!confirm('Còn '+Q.length+' thay đổi chưa gửi lên Drive. Đăng xuất sẽ làm mất. Tiếp tục?'))return;
+ try{['gn_v2','gn_v3','gn_salt','gn_admin','gn_prof'].forEach(k=>localStorage.removeItem(k))}catch(e){}KEY=null;idbDel('k').catch(()=>{});S={devices:{},staff:{},transfers:{},holders:{},requests:{}};Q=[];derive();
+ if(tok&&window.google)google.accounts.oauth2.revoke(tok);tok='';me=null;prof=null;admin=false;live=false;showLogin();render()}
+async function sync1(){if(busy||!CFG||!tok||!KEY||Date.now()>tokExp||!navigator.onLine)return;busy=true;const before=JSON.stringify(S);
+ try{for(const [fid,cols] of FILES()){
+   const meta=await gapi(DRV+fid+'?fields=modifiedTime,capabilities(canEdit)');
+   if(cols[0]==='devices'){const a=!!(meta.capabilities&&meta.capabilities.canEdit);if(a!==admin){admin=a;try{localStorage.setItem('gn_admin',a?'1':'0')}catch(e){}render()}}
+   const mine=Q.filter(q=>cols.includes(q.c));
+   if(meta.modifiedTime===lastMod[fid]&&!mine.length&&live)continue;
+   const rem=await decObj(await gapi(DRV+fid+'?alt=media'));let dirty=false,done=[];
+   mine.forEach(q=>{const m=rem[q.c]||(rem[q.c]={}),k=key(q.id);
+    if(q.op==='set'){if(JSON.stringify(m[k])===JSON.stringify(q.data))done.push(q);else{m[k]=JSON.parse(JSON.stringify(q.data));dirty=true}}
+    else if(k in m){delete m[k];dirty=true}else done.push(q)});
+   if(dirty){try{await gapi('https://www.googleapis.com/upload/drive/v3/files/'+fid+'?uploadType=media',{method:'PATCH',headers:J,body:JSON.stringify(await encObj(rem))});setTimeout(sync1,3000)}
+    catch(e){if(e.status===403){Q=Q.filter(q=>!mine.includes(q));lastMod[fid]='';setTimeout(sync1,300);alert('Bạn không có quyền ghi vào danh mục này. Thay đổi đã bị hủy.');continue}else throw e}}
+   Q=Q.filter(q=>!done.includes(q));cols.forEach(c=>{S[c]=rem[c]||{};got[c]=1});
+   const m2=await gapi(DRV+fid+'?fields=modifiedTime');lastMod[fid]=dirty?'':m2.modifiedTime}
+  live=true}catch(e){live=false;if(e.message==='BADKEY'){KEY=null;idbDel('k').catch(()=>{});afterKey=()=>{hideGate();render();sync()};askKey('Mật khẩu mã hóa đã thay đổi hoặc không khớp. Nhập lại.')}}
+ busy=false;if(JSON.stringify(S)!==before){derive();persist();render()}else persist();sync();checkConfirm()}
+async function loadAccounts(){try{const f='?fields=permissions(id,emailAddress,displayName,role)';const [c,a]=await Promise.all([gapi(DRV+CFG.catalogId+'/permissions'+f),gapi(DRV+CFG.activityId+'/permissions'+f)]);
+ perms=(c.permissions||[]).map(p=>({...p,aid:((a.permissions||[]).find(x=>x.emailAddress===p.emailAddress)||{}).id}));if(cat==='acc')render()}catch(e){}}
+async function addAcc(){const m=gv('a_mail').toLowerCase();if(!/^\S+@\S+\.\S+$/.test(m))return alert('Nhập địa chỉ Gmail hợp lệ');const adm=gv('a_role')==='admin';
+ const P=(id,r)=>gapi(DRV+id+'/permissions?sendNotificationEmail=false',{method:'POST',headers:J,body:JSON.stringify({type:'user',role:r,emailAddress:m})});
+ try{await P(CFG.catalogId,adm?'writer':'reader');await P(CFG.activityId,'writer');loadAccounts()}catch(e){alert('Không cấp được quyền: '+e.message)}}
+async function delAcc(pid,aid){if(!confirm('Thu hồi quyền của tài khoản này?'))return;try{await gapi(DRV+CFG.catalogId+'/permissions/'+pid,{method:'DELETE'});if(aid)await gapi(DRV+CFG.activityId+'/permissions/'+aid,{method:'DELETE'});loadAccounts()}catch(e){alert('Không thu hồi được: '+e.message)}}
+function accList(){const L={owner:'Chủ sở hữu (admin)',writer:'Admin',reader:'Người dùng'};
+ return `<h1 class="text-xl font-bold mb-1">Tài khoản</h1><p class="text-sm text-slate-500 mb-3">Cấp quyền cho cán bộ bằng Gmail. Quyền được áp dụng trực tiếp trên tệp Google Drive.</p><button class="btn bg-amber-100 text-amber-900 mb-3" onclick="changeKey()">Đổi mật khẩu mã hóa</button><div class="flex flex-col sm:flex-row gap-2 mb-4"><input id="a_mail" class="inp" placeholder="Gmail của cán bộ"><select id="a_role" class="inp"><option value="user">Người dùng</option><option value="admin">Admin</option></select><button class="btn bg-blue-800 text-white" onclick="addAcc()">Cấp quyền</button></div><div class="grid md:grid-cols-2 gap-3">${perms.map(p=>`<div class="bg-white rounded-xl shadow-sm p-3 flex justify-between gap-2"><div><b>${E(p.displayName||p.emailAddress)}</b><div class="text-sm text-slate-500">${E(p.emailAddress)} · ${L[p.role]||p.role}</div></div>${p.role==='owner'||(me&&p.emailAddress===me.email)?'':`<button class="btn bg-red-50 text-red-700" onclick="delAcc('${p.id}','${p.aid||''}')">Thu hồi</button>`}</div>`).join('')||'<p class="text-slate-500">Đang tải…</p>'}</div>`}
+function startCloud(){const C=window.DRIVE_CONFIG;if(!C||!C.clientId||/DAN_VAO/.test(C.clientId)){noCloud=true;admin=true;return sync()}
+ CFG=C;let c=null;try{c=JSON.parse(localStorage.getItem('gn_prof'))}catch(e){}
+ if(c&&c.me){me=c.me;prof=c.prof;admin=localStorage.getItem('gn_admin')==='1';SALT=localStorage.getItem('gn_salt')||'';const go=()=>{hideGate();render();sync()};afterKey=go;
+  idbGet('k').then(async k=>{if(k&&SALT){KEY=k;await loadLocal();go()}else askKey()}).catch(()=>askKey())}else showLogin()}
+function initData(){const C=window.DRIVE_CONFIG,cloudOn=C&&C.clientId&&!/DAN_VAO/.test(C.clientId);
+ try{if(cloudOn)localStorage.removeItem('gn_v2');else{const x=JSON.parse(localStorage.getItem('gn_v2'));if(x&&x.S){S={...S,...x.S};Q=x.Q||[]}}}catch(e){}
+ derive();startCloud()}
+addEventListener('online',()=>{flush();sync()});addEventListener('offline',()=>{live=false;sync()});setInterval(()=>{if(document.visibilityState==='visible')flush()},8000);
 let ord='desc';const NOTES=['Hoạt động bình thường','Bị khóa mã PIN','Thiếu phụ kiện','Trầy xước / móp méo','Pin yếu / hết pin','Màn hình bị nứt','Cần bảo trì'];
 const ordered=L=>ord==='desc'?[...L].reverse():[...L];
 const sortSel=()=>`<select class="inp" onchange="ord=this.value;render()"><option value="desc" ${ord==='desc'?'selected':''}>Mới nhất ở trên</option><option value="asc" ${ord==='asc'?'selected':''}>Cũ nhất ở trên</option></select>`;
@@ -148,8 +204,15 @@ function delStaff(i){const s=db.staff[i],c=db.devices.filter(d=>d.holder===s).le
  if(c)return alert(s+' đang giữ '+c+' thiết bị. Hãy bàn giao về kho trước khi xóa.');
  {const sid=db.staffObjs[i].id;ask('Xóa cán bộ '+s+'? Lịch sử giao nhận cũ vẫn được giữ.',()=>{rm('staff',sid);if(jf.who===s)jf.who=''},'Xóa')}}
 function delDev(id){ask('Xóa thiết bị '+id+'?',()=>rm('devices',id),'Xóa')}
-function transfers(){const cards=[...db.transfers].reverse().map(t=>`<div class="bg-white rounded-xl shadow-sm p-3"><div class="flex justify-between gap-2"><b>${E(dev(t.deviceId).name)}</b>${badge(t.status)}</div><div class="text-sm text-slate-500">${E(t.from)} → ${E(t.to)}<br>${fmt(t.time)}</div><div class="mt-2 flex flex-wrap gap-2">${t.status==='Chờ xác nhận'?`<button class="btn bg-blue-800 text-white flex-1" onclick="zalo('${t.id}')">Hiện mã QR xác nhận</button>`:''}${t.status==='Đã hoàn tất'&&dev(t.deviceId).holder===t.to?`<button class="btn bg-violet-100 text-violet-800 flex-1" onclick="retForm('${t.deviceId}')">Trả lại</button>`:''}<button class="btn bg-slate-100 flex-1" onclick="pdfOne('${t.id}')">Xuất PDF</button></div></div>`).join('')||'<p class="text-slate-500">Chưa có phiếu.</p>';
- return `<div class="flex justify-between items-center mb-3"><h1 class="text-xl font-bold">Phiếu giao nhận</h1><button class="btn bg-blue-800 text-white" onclick="trForm()">+ Tạo phiếu</button></div><div class="grid md:grid-cols-2 gap-3">${cards}</div>`}
+function transfers(){const cards=[...db.transfers].reverse().map(t=>`<div class="bg-white rounded-xl shadow-sm p-3"><div class="flex justify-between gap-2"><b>${E(dev(t.deviceId).name)}</b>${badge(t.status)}</div><div class="text-sm text-slate-500">${E(t.from)} → ${E(t.to)}<br>${fmt(t.time)}</div><div class="mt-2 flex flex-wrap gap-2">${t.status==='Chờ xác nhận'?`<button class="btn bg-blue-800 text-white flex-1" onclick="zalo('${t.id}')">Hiện mã QR xác nhận</button>`:''}${t.status==='Đã hoàn tất'&&dev(t.deviceId).holder===t.to?`<button class="btn bg-violet-100 text-violet-800 flex-1" onclick="retForm('${t.deviceId}')">Trả lại</button>`:''}<button class="btn bg-slate-100 flex-1" onclick="pdfOne('${t.id}')">Xuất PDF</button>${admin?`<button class="btn bg-red-50 text-red-700 flex-1" onclick="delTr('${t.id}')">Xóa</button>`:''}</div></div>`).join('')||'<p class="text-slate-500">Chưa có phiếu.</p>';
+ return `<div class="flex flex-wrap justify-between items-center gap-2 mb-3"><h1 class="text-xl font-bold">Phiếu giao nhận</h1><div class="flex gap-2">${admin?'<button class="btn bg-red-50 text-red-700" onclick="resetLog()">Làm mới nhật ký</button>':''}<button class="btn bg-blue-800 text-white" onclick="trForm()">+ Tạo phiếu</button></div></div><div class="grid md:grid-cols-2 gap-3">${cards}</div>`}
+function delTr(id){if(!admin)return;if(confirm('Xóa phiếu này khỏi nhật ký? Không thể hoàn tác. (Người đang giữ thiết bị không bị thay đổi.)'))rm('transfers',id)}
+function resetLog(){if(!admin)return;const n=db.transfers.length;if(!n)return alert('Nhật ký đang trống.');
+ if(!confirm('Xóa toàn bộ '+n+' phiếu giao nhận? Không thể hoàn tác.'))return;
+ const back=confirm('Đồng thời đưa TẤT CẢ thiết bị về Kho?\nOK = đưa về Kho, Hủy = giữ nguyên người đang giữ.');
+ db.transfers.forEach(t=>{delete S.transfers[key(t.id)];Q.push({op:'del',c:'transfers',id:t.id})});
+ if(back)db.devices.forEach(d=>{if(d.holder!=='Kho'){const o={id:d.id,holder:'Kho'};S.holders[key(d.id)]=o;Q.push({op:'set',c:'holders',id:d.id,data:o})}});
+ changed()}
 function trForm(){const opt=a=>a.map(x=>`<option>${E(x)}</option>`).join('');
  modal(`<h2 class="font-bold text-lg mb-3">Tạo phiếu giao nhận</h2>
  <label class="block mb-3 text-sm font-semibold">Thiết bị<select id="t_dev" class="inp mt-1 font-normal" onchange="document.getElementById('t_from').value=dev(this.value).holder||'Kho'">${db.devices.map(d=>`<option value="${d.id}">${E(d.id)} - ${E(d.name)}</option>`).join('')}</select></label>
@@ -167,7 +230,7 @@ function zalo(id){const t=db.transfers.find(x=>x.id===id),link=base()+'?c='+t.id
  if(window.QRCode)new QRCode(document.getElementById('qrbox'),{text:link,width:200,height:200});render()}
 function checkConfirm(){if(!pc||pcShown||!got.transfers)return;const t=db.transfers.find(x=>x.id===pc.id);pcShown=true;history.replaceState(null,'',base());
  if(!t)return alert('Không tìm thấy phiếu giao nhận.');if(t.token!==pc.tk)return alert('Mã QR không hợp lệ.');if(t.status!=='Chờ xác nhận')return alert('Phiếu này đã được xác nhận trước đó.');
- const d=dev(t.deviceId);modal(`<h2 class="font-bold text-lg mb-3">Xác nhận nhận thiết bị</h2><p class="text-sm mb-3"><b>${E(d.name)}</b> (${E(d.serial)})<br>${E(t.from)} → <b>${E(t.to)}</b><br>${fmt(t.time)}<br>Ghi chú: ${E(t.note)||'-'}</p><p class="text-xs text-slate-500 mb-3">Bạn đang đăng nhập: <b>${E(prof&&prof.name)}</b> ${E(prof&&prof.phone)}</p><div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-emerald-600 text-white flex-1" onclick="confirmTr('${t.id}')">Tôi xác nhận đã nhận</button></div>`)}
+ const d=dev(t.deviceId);modal(`<h2 class="font-bold text-lg mb-3">Xác nhận nhận thiết bị</h2><p class="text-sm mb-3"><b>${E(d.name)}</b> (${E(d.serial)})<br>${E(t.from)} → <b>${E(t.to)}</b><br>${fmt(t.time)}<br>Ghi chú: ${E(t.note)||'-'}</p><p class="text-xs text-slate-500 mb-3">Bạn đang đăng nhập: <b>${E(prof&&prof.name)}</b> ${E(prof&&(prof.phone||prof.email))}</p><div class="flex gap-2"><button class="btn bg-slate-100 flex-1" onclick="closeM()">Hủy</button><button class="btn bg-emerald-600 text-white flex-1" onclick="confirmTr('${t.id}')">Tôi xác nhận đã nhận</button></div>`)}
 function confirmTr(id){const t={...db.transfers.find(x=>x.id===id),status:'Đã hoàn tất',doneAt:Date.now(),confirmBy:me?{uid:me.uid,name:(prof&&prof.name)||'',phone:(prof&&prof.phone)||'',email:me.email||''}:null},d0=db.devices.find(x=>x.id===t.deviceId),d=d0&&{...d0};
  closeM();put('transfers',t);if(d)put('holders',{id:d.id,holder:t.to})}
 let jf={from:'',to:'',who:''};
@@ -190,7 +253,7 @@ function pdfOne(id){const t=db.transfers.find(x=>x.id===id),d=dev(t.deviceId);
  <p><b>I. BÊN GIAO:</b> ${E(t.from)}</p><p><b>II. BÊN NHẬN:</b> ${E(t.to)}</p><p><b>III. DANH SÁCH THIẾT BỊ:</b></p>
  <table ${TBL}><tr style="font-weight:bold"><td ${TD}>STT</td><td ${TD}>Mã</td><td ${TD}>Tên thiết bị</td><td ${TD}>Số serial</td><td ${TD}>Tình trạng khi giao</td></tr><tr><td ${TD}>1</td><td ${TD}>${E(d.id)}</td><td ${TD}>${E(d.name)}</td><td ${TD}>${E(d.serial)}</td><td ${TD}>${E(t.note)||'Bình thường'}</td></tr></table>
  <p>Trạng thái: <b>${t.status}</b>${t.doneAt?' (xác nhận lúc '+fmt(t.doneAt)+')':''}. Biên bản lập thành 02 bản, mỗi bên giữ 01 bản.</p>
- <table style="width:100%;text-align:center;margin-top:20px"><tr><td><b>BÊN GIAO</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${E(t.from)}</td><td><b>BÊN NHẬN</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${t.status==='Đã hoàn tất'?'<span style="color:#047857">✔ Đã xác nhận qua mã QR'+(t.confirmBy?': '+E(t.confirmBy.name)+(t.confirmBy.phone?' - '+E(t.confirmBy.phone):''):'')+'<br></span>':''}${E(t.to)}</td></tr></table>`,t.id+'.pdf')}
+ <table style="width:100%;text-align:center;margin-top:20px"><tr><td><b>BÊN GIAO</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${E(t.from)}</td><td><b>BÊN NHẬN</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${t.status==='Đã hoàn tất'?'<span style="color:#047857">✔ Đã xác nhận qua mã QR'+(t.confirmBy?': '+E(t.confirmBy.name)+((t.confirmBy.phone||t.confirmBy.email)?' - '+E(t.confirmBy.phone||t.confirmBy.email):''):'')+'<br></span>':''}${E(t.to)}</td></tr></table>`,t.id+'.pdf')}
 function pdfLog(){const L=ordered(jList());const sub=[jf.from&&'từ '+jf.from,jf.to&&'đến '+jf.to,jf.who&&'cá nhân: '+jf.who].filter(Boolean).join(' · ')||'Toàn bộ';
  makePdf(`${HEAD}<h2 style="text-align:center;margin:24px 0 4px">SỔ NHẬT KÝ GIAO NHẬN THIẾT BỊ</h2><p style="text-align:center">${E(sub)}</p>
  <table ${TBL}><tr style="font-weight:bold"><td ${TD}>STT</td><td ${TD}>Thời gian</td><td ${TD}>Thiết bị</td><td ${TD}>Giao</td><td ${TD}>Nhận</td><td ${TD}>Trạng thái</td></tr>${L.map((t,i)=>`<tr><td ${TD}>${i+1}</td><td ${TD}>${fmt(t.time)}</td><td ${TD}>${E(dev(t.deviceId).name)}</td><td ${TD}>${E(t.from)}</td><td ${TD}>${E(t.to)}</td><td ${TD}>${t.status}</td></tr>`).join('')}</table><p>Tổng cộng: ${L.length} phiếu.</p>`,'so-nhat-ky.pdf')}
