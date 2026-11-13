@@ -25,7 +25,8 @@
 <main id="app" class="max-w-6xl mx-auto p-4 pb-24"></main>
 <div id="gate" class="hidden fixed inset-0 z-40 bg-slate-100 items-center justify-center p-4"><div id="gbox" class="bg-white rounded-2xl shadow p-6 w-full max-w-sm"></div></div>
 <div id="modal" class="hidden fixed inset-0 bg-black/50 z-50 items-end md:items-center justify-center"><div id="mbox" class="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-5 max-h-[90vh] overflow-auto"></div></div>
-<div id="pdfroot" style="position:absolute;left:-10000px;top:0;width:800px;background:#fff"></div>
+<div id="pdfroot" style="position:absolute;left:0;top:0;width:800px;background:#fff;z-index:9990"></div>
+<div id="pdfmask" style="display:none;position:fixed;inset:0;z-index:9999;background:#fff;align-items:center;justify-content:center;font-weight:600;color:#1e3a8a">Đang tạo PDF…</div>
 <script>
 const TABS=[['dash','Tổng quan'],['dev','Danh mục'],['tr','Giao nhận'],['log','Nhật ký']];
 const ST=['Mới','Đang sử dụng','Cần bảo trì'];
@@ -246,9 +247,20 @@ function journal(){const L=ordered(jList());
  <div class="md:hidden space-y-3">${cards}</div><div class="hidden md:block bg-white rounded-xl shadow-sm overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-blue-50 text-blue-900"><tr><th class="p-3">Thời gian</th><th class="p-3">Thiết bị</th><th class="p-3">Bên giao</th><th class="p-3">Bên nhận</th><th class="p-3">Ghi chú</th><th class="p-3">Trạng thái</th></tr></thead><tbody>${rows}</tbody></table></div>`}
 const HEAD='<div style="text-align:center;font-weight:bold">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<br><u>Độc lập - Tự do - Hạnh phúc</u></div>';
 const TBL='style="width:100%;border-collapse:collapse;font-size:13px"',TD='style="border:1px solid #000;padding:5px"';
-function makePdf(html,name){const r=document.getElementById('pdfroot');r.innerHTML=`<div style="padding:30px;font-family:'Times New Roman',serif;font-size:14px;color:#000">${html}</div>`;
- const {jsPDF}=window.jspdf,doc=new jsPDF({unit:'pt',format:'a4'});
- doc.html(r,{x:0,y:0,width:595,windowWidth:800,callback:d=>{d.save(name);r.innerHTML=''}})}
+function printFallback(x){const w=window.open('','_blank');if(!w)return alert('Không tạo được PDF. Hãy cho phép cửa sổ bật lên rồi thử lại.');
+ w.document.write('<!doctype html><meta charset="utf-8"><title>Biên bản</title><body style="font-family:\'Times New Roman\',serif;font-size:14px;margin:18mm">'+x+'</body>');w.document.close();w.focus();setTimeout(()=>w.print(),400)}
+async function makePdf(html,name){const r=document.getElementById('pdfroot'),mask=document.getElementById('pdfmask');
+ r.innerHTML=`<div style="padding:30px;font-family:'Times New Roman',serif;font-size:14px;color:#000;background:#fff">${html}</div>`;
+ mask.style.display='flex';scrollTo(0,0);await new Promise(x=>setTimeout(x,200));const keep=r.innerHTML;
+ try{const cv=await html2canvas(r,{scale:2,backgroundColor:'#ffffff',scrollX:0,scrollY:0,windowWidth:800,logging:false});
+  const d=cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data;let ink=0;for(let i=0;i<d.length;i+=52)if(d[i]<160)ink++;
+  if(ink<20)throw new Error('blank');
+  const {jsPDF}=window.jspdf,doc=new jsPDF({unit:'pt',format:'a4'}),W=595,H=842,ph=Math.floor(cv.width*H/W);
+  for(let y=0,pg=0;y<cv.height;y+=ph,pg++){const s=document.createElement('canvas');s.width=cv.width;s.height=Math.min(ph,cv.height-y);const g=s.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,s.width,s.height);g.drawImage(cv,0,y,cv.width,s.height,0,0,cv.width,s.height);
+   if(pg)doc.addPage();doc.addImage(s.toDataURL('image/jpeg',0.92),'JPEG',0,0,W,s.height*W/cv.width)}
+  doc.save(name)}
+ catch(e){printFallback(keep)}
+ finally{r.innerHTML='';mask.style.display='none'}}
 function pdfOne(id){const t=db.transfers.find(x=>x.id===id),d=dev(t.deviceId);
  makePdf(`${HEAD}<h2 style="text-align:center;margin:24px 0 4px">${t.kind==='return'?'BIÊN BẢN TRẢ LẠI THIẾT BỊ':'BIÊN BẢN BÀN GIAO THIẾT BỊ'}</h2><p style="text-align:center">Số: ${t.id}</p>
  <p>Hôm nay, lúc ${fmt(t.time)}, hai bên tiến hành bàn giao thiết bị như sau:</p>

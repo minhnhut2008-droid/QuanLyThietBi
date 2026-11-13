@@ -22,7 +22,8 @@
 2. App hiển thị 3 dòng `deviceFile`, `staffFile`, `logFile` (là liên kết Drive). Dán vào `drive-config.js`, tải lại lên GitHub, mở lại app.
 3. Đặt **mật khẩu mã hóa** (từ 8 ký tự, nhập 2 lần). Mất mật khẩu thì không khôi phục được dữ liệu.
 
-(Nếu muốn tự tạo tệp: tạo 3 tệp văn bản nội dung `{}` rồi tải lên Drive, dán liên kết vào cấu hình. Tên tệp tùy ý.)
+**Không thấy tệp .json trên Drive?** Tệp chỉ xuất hiện sau khi admin bấm **Tạo 3 tệp trên Drive** (ở mục "Drive của tôi" của tài khoản admin, tìm chữ `QLTB`). Nếu `drive-config.js` chưa điền `clientId` thì app chạy chế độ "Chỉ lưu trên máy này" và không có tệp nào trên Drive.
+**Cách làm thủ công:** trong gói có thư mục `mau-tep-drive/` chứa 3 tệp mẫu (nội dung `{}`). Vào Drive → **Mới → Tải tệp lên**, chọn 3 tệp, bấm chuột phải từng tệp → **Chia sẻ → Sao chép đường liên kết**, dán vào `deviceFile`, `staffFile`, `logFile`. Admin sẽ được yêu cầu chọn 3 tệp bằng bộ chọn tệp ở lần đăng nhập đầu.
 
 ## 3. Cấp quyền trên Google Drive
 Trên Drive, bấm chuột phải từng tệp → **Chia sẻ (Share)** → nhập Gmail → chọn quyền. Để "Quyền truy cập chung" là **Bị hạn chế (Restricted)**.
@@ -52,9 +53,12 @@ Trên Drive, bấm chuột phải từng tệp → **Chia sẻ (Share)** → nh�
 ## 6. Nếu Bộ chọn tệp (Picker) không hoạt động
 Đặt `picker:false` trong `drive-config.js`. App sẽ xin quyền truy cập **toàn bộ Google Drive** của người đăng nhập (rộng hơn), nhưng không cần `apiKey`, `appId` và không cần bước chọn tệp.
 
+## Xuất PDF
+App vẽ biên bản trên màn hình tạm thời (hiện chữ "Đang tạo PDF…" vài giây) rồi lưu thành tệp PDF. Nếu vì lý do nào đó không vẽ được, app tự mở hộp thoại **In** để bạn chọn "Lưu dưới dạng PDF". Lần mở đầu cần có mạng để tải thư viện PDF.
+
 ## Lưu ý
 - Bản này dùng **3 tệp mới**. Dữ liệu của bản 2 tệp trước đó không tự chuyển sang, cần nhập lại.
 - Mất mật khẩu mã hóa = mất dữ liệu, không ai khôi phục được.
 - Chế độ Testing: Google có thể bắt đăng nhập lại khoảng mỗi 7 ngày; phiên làm việc hết sau 1 giờ (chạm vào dòng cảnh báo trên đầu app để đăng nhập lại, thay đổi vẫn được giữ).
 - Không đổi tên, xóa hay di chuyển 3 tệp trong Drive của admin.
-- Khi sửa mã, đổi `qltb-v7` trong sw.js thành bản mới để điện thoại cập nhật.
+- Khi sửa mã, đổi `qltb-v8` trong sw.js thành bản mới để điện thoại cập nhật.
