@@ -1,54 +1,60 @@
-# Quản Lý Thiết Bị (PWA) - Lưu và đồng bộ trên Google Drive
+# Quản Lý Thiết Bị (PWA) - Liên kết trực tiếp tới 3 tệp trên Google Drive
 
 ## Cách hoạt động
-- Dữ liệu lưu trong **2 tệp JSON trên Google Drive** của admin: `QLTB-danh-muc.json` (thiết bị, cán bộ) và `QLTB-giao-nhan.json` (giao nhận, người giữ, đề xuất).
-- Mỗi người đăng nhập bằng **tài khoản Google (Gmail)**. Quyền do chính Google Drive kiểm soát:
-  - **Admin**: sửa được cả 2 tệp.
-  - **Người dùng**: chỉ xem tệp danh mục, sửa được tệp giao nhận (nên không tự thêm/sửa/xóa danh mục được).
-- Đồng bộ bằng cách hỏi Drive định kỳ (khoảng **8-10 giây**), không phải tức thì. Mất mạng vẫn dùng được, thay đổi xếp hàng và tự gửi lên khi có mạng.
+- App chỉ làm việc với **3 tệp trên Google Drive**, được liên kết bằng đường link trong `drive-config.js`:
+  1. `QLTB-thiet-bi.json` - danh mục thiết bị
+  2. `QLTB-can-bo.json` - danh sách cán bộ
+  3. `QLTB-giao-nhan.json` - nhật ký giao nhận (phiếu, người đang giữ, đề xuất chờ duyệt)
+- **Quyền = quyền chia sẻ trên Drive.** Không có màn hình quản lý tài khoản trong app; admin chia sẻ tệp bằng Gmail ngay trên Google Drive.
+- Mặc định app chỉ xin quyền truy cập **đúng 3 tệp được chọn** (không đọc phần còn lại của Drive).
+- Dữ liệu được **mã hóa AES-256 trên thiết bị** trước khi lưu vào máy và tải lên Drive. Đồng bộ khoảng 8-10 giây một lần; mất mạng vẫn dùng được và tự gửi lên khi có mạng.
 
-## 1. Tạo ứng dụng đăng nhập Google (làm một lần, miễn phí)
-1. Vào https://console.cloud.google.com → tạo **dự án mới**.
-2. **APIs & Services → Library** → tìm **Google Drive API** → **Enable**.
-3. **OAuth consent screen** (hoặc Google Auth Platform):
-   - Loại người dùng: **External**; điền tên app, email hỗ trợ.
-   - Trạng thái xuất bản: để **Testing**.
-   - **Test users**: thêm Gmail của **admin và từng cán bộ** (tối đa 100 người). Người không có trong danh sách sẽ không đăng nhập được.
-4. **Credentials → Create credentials → OAuth client ID** → loại **Web application**.
-   - **Authorized JavaScript origins**: thêm `https://TEN-TAI-KHOAN.github.io` (chỉ tên miền, không có đường dẫn). Muốn thử trên máy thì thêm `http://localhost:8000`.
-   - Create → sao chép **Client ID**.
-5. Mở `drive-config.js`, dán Client ID vào `clientId`. Tải toàn bộ file lên GitHub.
+## 1. Cấu hình Google Cloud (admin, làm một lần)
+1. Vào https://console.cloud.google.com → tạo **dự án mới**. Ghi lại **Project number** (số dự án) ở trang Dashboard.
+2. **APIs & Services → Library**: bật **Google Drive API** và **Google Picker API**.
+3. **OAuth consent screen**: loại **External**, điền tên app và email hỗ trợ, để trạng thái **Testing**, thêm **Test users** là Gmail của admin và từng cán bộ (tối đa 100).
+4. **Credentials → Create credentials → OAuth client ID** → **Web application** → *Authorized JavaScript origins*: `https://TEN-TAI-KHOAN.github.io` (thử trên máy thì thêm `http://localhost:8000`). Sao chép **Client ID**.
+5. **Credentials → Create credentials → API key** → vào khóa vừa tạo: *Application restrictions* chọn **Websites** và thêm `https://TEN-TAI-KHOAN.github.io/*`; *API restrictions* chọn **Google Picker API**. Sao chép khóa.
+6. Mở `drive-config.js`, điền `clientId`, `apiKey`, `appId` (= Project number).
 
-## 2. Tạo kho dữ liệu (admin làm một lần)
-1. Mở app, bấm **Đăng nhập bằng Google** bằng tài khoản admin. Màn hình Google có thể báo "Google hasn't verified this app": bấm **Advanced → Go to ... (unsafe)** rồi đồng ý cấp quyền Drive.
-2. App hiện nút **Tạo kho dữ liệu trên Drive** → bấm. App hiện 2 dòng `catalogId` và `activityId`.
-3. Dán 2 dòng đó vào `drive-config.js`, tải lại lên GitHub, mở lại app.
+## 2. Tạo và liên kết 3 tệp (admin)
+1. Tải app lên GitHub Pages, mở app, đăng nhập Google bằng tài khoản admin. App hiện nút **Tạo 3 tệp trên Drive** → bấm.
+2. App hiển thị 3 dòng `deviceFile`, `staffFile`, `logFile` (là liên kết Drive). Dán vào `drive-config.js`, tải lại lên GitHub, mở lại app.
+3. Đặt **mật khẩu mã hóa** (từ 8 ký tự, nhập 2 lần). Mất mật khẩu thì không khôi phục được dữ liệu.
 
-## 2b. Mã hóa dữ liệu (tự động)
-- Mọi dữ liệu được **mã hóa ngay trên thiết bị** bằng AES-256-GCM trước khi lưu vào bộ nhớ máy hoặc tải lên Google Drive. Trên Drive chỉ có chuỗi mã hóa, Google và người không có mật khẩu không đọc được nội dung. Giải mã chỉ thực hiện trên thiết bị của người đã nhập mật khẩu.
-- **Lần đầu (admin):** sau khi đăng nhập, app yêu cầu **tạo mật khẩu mã hóa** (từ 8 ký tự, nhập 2 lần). Hãy dùng mật khẩu dài, khó đoán.
-- **Cán bộ:** admin gửi mật khẩu mã hóa qua kênh an toàn (nói trực tiếp, không gửi chung với tài khoản). Cán bộ nhập khi mở app lần đầu; có thể tick **Ghi nhớ trên thiết bị này** để không phải nhập lại (khóa được giữ ở dạng không thể xuất ra trên máy).
-- **Mất mật khẩu = mất dữ liệu**, không ai khôi phục được (kể cả tôi, Google hay admin). Hãy cất mật khẩu ở nơi an toàn.
-- **Thu hồi người rời đơn vị:** thu hồi quyền Gmail ở tab Tài khoản **và** bấm **Đổi mật khẩu mã hóa** (admin). Dữ liệu được mã hóa lại bằng mật khẩu mới, các máy còn lại sẽ phải nhập mật khẩu mới.
-- Nằm ngoài phạm vi mã hóa: tên 2 tệp trên Drive, thời điểm sửa, danh sách Gmail được cấp quyền, và tên/email người đăng nhập lưu trên máy.
+(Nếu muốn tự tạo tệp: tạo 3 tệp văn bản nội dung `{}` rồi tải lên Drive, dán liên kết vào cấu hình. Tên tệp tùy ý.)
 
-## 3. Cấp quyền cho cán bộ
-Admin vào **Danh mục → Tài khoản**, nhập Gmail, chọn Người dùng hoặc Admin, bấm **Cấp quyền**. Có thể **Thu hồi** bất cứ lúc nào.
-Cán bộ đăng nhập bằng đúng Gmail đó. Nếu chưa được cấp, app báo "chưa được cấp quyền".
+## 3. Cấp quyền trên Google Drive
+Trên Drive, bấm chuột phải từng tệp → **Chia sẻ (Share)** → nhập Gmail → chọn quyền. Để "Quyền truy cập chung" là **Bị hạn chế (Restricted)**.
 
-## 4. Cài trên điện thoại
-Android: Chrome → ⋮ → Cài đặt ứng dụng. iPhone: Safari → Chia sẻ → Thêm vào Màn hình chính.
+| Tệp | Admin | Người dùng thường |
+|---|---|---|
+| QLTB-thiet-bi.json | **Người chỉnh sửa (Editor)** | **Người xem (Viewer)** |
+| QLTB-can-bo.json | **Người chỉnh sửa** | **Người xem** |
+| QLTB-giao-nhan.json | **Người chỉnh sửa** | **Người chỉnh sửa** |
 
-## 4b. Xóa / làm mới nhật ký (chỉ admin)
-Ở tab **Giao nhận**: nút **Xóa** trên từng phiếu, và nút **Làm mới nhật ký** để xóa toàn bộ phiếu (có hỏi xác nhận, có tùy chọn đưa tất cả thiết bị về Kho). Không thể hoàn tác. Nút này chỉ hiện với admin; về kỹ thuật, tệp giao nhận trên Drive cho mọi tài khoản ghi, nên cần cấp quyền admin cho người đáng tin cậy.
+- App tự nhận vai trò: ai chỉnh sửa được tệp thiết bị là admin; người chỉ xem là người dùng thường (thêm danh mục phải **đề xuất**, admin duyệt).
+- Người dùng bắt buộc có quyền **chỉnh sửa** tệp giao nhận, nếu không sẽ không tạo được phiếu.
+- Admin cũng phải được thêm vào **Test users** (bước 1.3).
 
-## 5. Xác nhận bằng mã QR
-Mỗi phiếu có mã QR. Người nhận quét bằng camera, đăng nhập Google, bấm "Tôi xác nhận đã nhận". Tên và email Google của người quét được lưu và in trên biên bản PDF.
+## 4. Người dùng thường bắt đầu như thế nào
+1. Admin gửi **đường link app** (và nhắc đã chia sẻ 3 tệp cho Gmail của họ). Gửi **mật khẩu mã hóa** qua kênh riêng.
+2. Mở link trên điện thoại → **Đăng nhập bằng Google** (nếu có cảnh báo "chưa xác minh": Advanced → Go to ... ).
+3. App hiện **Chọn 3 tệp dữ liệu**: bấm, chọn cả 3 tệp trong danh sách (nếu không thấy, vào mục *Được chia sẻ với tôi*), bấm **Select**. Việc này chỉ làm một lần trên mỗi tài khoản.
+4. Nhập mật khẩu mã hóa (tick *Ghi nhớ trên thiết bị này* để khỏi nhập lại).
+5. Cài lên màn hình chính: Android dùng Chrome → ⋮ → Cài đặt ứng dụng; iPhone dùng Safari → Chia sẻ → Thêm vào Màn hình chính.
 
-## Lưu ý quan trọng
-- **Quyền truy cập rộng:** để đọc tệp do admin chia sẻ, app xin quyền truy cập **toàn bộ Google Drive** của người đăng nhập. Nên dùng Gmail riêng cho công việc, không dùng Gmail có nhiều dữ liệu cá nhân. Gỡ quyền: https://myaccount.google.com/permissions
-- **Cảnh báo "chưa xác minh":** do app ở chế độ Testing. Ở chế độ này Google có thể bắt đăng nhập lại khoảng mỗi 7 ngày.
-- **Phiên đăng nhập 1 giờ:** hết phiên, dòng trạng thái trên đầu app báo "Phiên Google hết hạn", chạm vào để đăng nhập lại. Trong lúc đó mọi thay đổi vẫn được lưu và gửi sau.
-- **Không tức thì và không khóa giao dịch:** nếu hai người sửa cùng lúc, app tự gửi lại để cả hai thay đổi đều được ghi, nhưng nếu sửa chính một mục thì bản gửi sau thắng.
-- Đừng đổi tên, xóa hay di chuyển 2 tệp JSON trong Drive của admin.
-- Khi sửa mã, đổi `qltb-v6` trong sw.js thành bản mới để điện thoại cập nhật.
+## 5. Quản lý
+- **Thêm người dùng:** chia sẻ 3 tệp cho Gmail của họ (và thêm vào Test users). **Thu hồi:** bỏ chia sẻ trên Drive **và** bấm **Đổi mật khẩu mã hóa** (admin, ở tab Danh mục), rồi báo mật khẩu mới cho những người còn lại.
+- **Xóa phiếu / làm mới nhật ký (admin):** ở tab Giao nhận. Nút chỉ ẩn với người dùng thường; tệp giao nhận cho họ quyền chỉnh sửa nên về kỹ thuật vẫn có thể bị xóa phiếu. Chỉ cấp cho người đáng tin cậy.
+- **QR xác nhận:** người nhận quét mã, đăng nhập, bấm "Tôi xác nhận đã nhận"; tên và email Google của người quét được lưu và in trên biên bản PDF.
+
+## 6. Nếu Bộ chọn tệp (Picker) không hoạt động
+Đặt `picker:false` trong `drive-config.js`. App sẽ xin quyền truy cập **toàn bộ Google Drive** của người đăng nhập (rộng hơn), nhưng không cần `apiKey`, `appId` và không cần bước chọn tệp.
+
+## Lưu ý
+- Bản này dùng **3 tệp mới**. Dữ liệu của bản 2 tệp trước đó không tự chuyển sang, cần nhập lại.
+- Mất mật khẩu mã hóa = mất dữ liệu, không ai khôi phục được.
+- Chế độ Testing: Google có thể bắt đăng nhập lại khoảng mỗi 7 ngày; phiên làm việc hết sau 1 giờ (chạm vào dòng cảnh báo trên đầu app để đăng nhập lại, thay đổi vẫn được giữ).
+- Không đổi tên, xóa hay di chuyển 3 tệp trong Drive của admin.
+- Khi sửa mã, đổi `qltb-v7` trong sw.js thành bản mới để điện thoại cập nhật.
