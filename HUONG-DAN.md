@@ -18,6 +18,13 @@ Chạm vào dòng cảnh báo ở đầu app để xem lý do. Cách xử lý:
 2. Điền lại `deviceFile`, `staffFile`, `logFile` (tìm tệp `QLTB` trên Drive → chuột phải → Chia sẻ → Sao chép đường liên kết). Không bấm "Tạo 3 tệp" lần nữa nếu 3 tệp cũ vẫn còn, vì sẽ tạo bản trống mới.
 3. Lưu rồi tải lại app (kéo xuống làm mới, hoặc đóng hẳn rồi mở lại để điện thoại nhận bản mới).
 
+## Khi app báo "Mật khẩu mã hóa đã thay đổi hoặc không khớp"
+Nghĩa là mật khẩu (hoặc khóa đã nhớ trên máy) không giải mã được dữ liệu trên Drive.
+1. Nhập lại **đúng mật khẩu mã hóa** do admin đặt (phân biệt hoa thường). Bản mới tự lấy "muối" từ chính các tệp trên Drive nên không còn bị kẹt do dữ liệu cũ trên máy.
+2. Nếu admin vừa **đổi mật khẩu** hoặc **đặt lại kho**, nhập mật khẩu mới.
+3. **Admin quên mật khẩu:** ở màn hình này bấm **Quên mật khẩu? Đặt lại kho dữ liệu (xóa hết)**, gõ `XOA` để xác nhận, rồi tạo mật khẩu mới. Toàn bộ dữ liệu trên 3 tệp bị xóa, không khôi phục được.
+4. Người dùng thường quên mật khẩu thì hỏi admin; app không thể khôi phục.
+
 ## 1. Cấu hình Google Cloud (admin, làm một lần)
 1. Vào https://console.cloud.google.com → tạo **dự án mới**. Ghi lại **Project number** (số dự án) ở trang Dashboard.
 2. **APIs & Services → Library**: bật **Google Drive API** và **Google Picker API**.
@@ -70,4 +77,4 @@ App vẽ biên bản trên màn hình tạm thời (hiện chữ "Đang tạo PD
 - Mất mật khẩu mã hóa = mất dữ liệu, không ai khôi phục được.
 - Chế độ Testing: Google có thể bắt đăng nhập lại khoảng mỗi 7 ngày; phiên truy cập Google chỉ sống 1 giờ (quy định của Google). App **tự gia hạn** im lặng trước khi hết hạn; nếu trình duyệt chặn thì **chạm vào bất kỳ đâu** trên app hoặc vào dòng cảnh báo ở đầu app để gia hạn (có thể thấy cửa sổ Google lóe lên). Thay đổi không bị mất, được giữ lại và gửi sau.
 - Không đổi tên, xóa hay di chuyển 3 tệp trong Drive của admin.
-- Khi sửa mã, đổi `qltb-v10` trong sw.js thành bản mới để điện thoại cập nhật.
+- Khi sửa mã, đổi `qltb-v11` trong sw.js thành bản mới để điện thoại cập nhật.

@@ -62,16 +62,24 @@ const idbPut=async(k,v)=>{const d=await idb();return new Promise((res,rej)=>{con
 const idbGet=async k=>{const d=await idb();return new Promise((res,rej)=>{const q=d.transaction('k').objectStore('k').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})};
 const idbDel=async k=>{const d=await idb();return new Promise(res=>{const t=d.transaction('k','readwrite');t.objectStore('k').delete(k);t.oncomplete=res;t.onerror=res})};
 async function loadLocal(){try{const c=localStorage.getItem('gn_v3');if(!c)return;const x=await decObj(JSON.parse(c));S={...S,...x.S};Q=x.Q||[];derive()}catch(e){}}
-function askKey(msg){const mk=needCreate&&admin;showGate(LOGO+`<p class="text-sm text-slate-500 mb-3">${mk?'Tạo <b>mật khẩu mã hóa</b> cho kho dữ liệu (từ 8 ký tự). Chia sẻ mật khẩu này cho cán bộ qua kênh an toàn. <b>Mất mật khẩu thì không thể khôi phục dữ liệu.</b>':'Nhập <b>mật khẩu mã hóa</b> do admin cung cấp. Mật khẩu không được gửi đi đâu.'}</p>${msg?`<p class="text-sm text-red-600 mb-2">${E(msg)}</p>`:''}<input id="k_pw" type="password" class="inp mb-2" placeholder="Mật khẩu mã hóa">${mk?'<input id="k_pw2" type="password" class="inp mb-2" placeholder="Nhập lại mật khẩu">':''}<label class="flex items-center gap-2 text-sm mb-4"><input id="k_rem" type="checkbox"> Ghi nhớ trên thiết bị này</label><button class="btn bg-blue-800 text-white w-full mb-2" onclick="tryKey()">${mk?'Tạo và mở khóa':'Mở khóa'}</button><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>`)}
+async function upl(fid,o){await dapi('https://www.googleapis.com/upload/drive/v3/files/'+fid+'?uploadType=media',{method:'PATCH',headers:J,body:JSON.stringify(await encObj(o))})}
+function askKey(msg){const mk=needCreate&&admin;showGate(LOGO+`<p class="text-sm text-slate-500 mb-3">${mk?'Tạo <b>mật khẩu mã hóa</b> cho kho dữ liệu (từ 8 ký tự). Chia sẻ mật khẩu này cho cán bộ qua kênh an toàn. <b>Mất mật khẩu thì không thể khôi phục dữ liệu.</b>':'Nhập <b>mật khẩu mã hóa</b> do admin cung cấp. Mật khẩu không được gửi đi đâu.'}</p>${msg?`<p class="text-sm text-red-600 mb-2">${E(msg)}</p>`:''}<input id="k_pw" type="password" class="inp mb-2" placeholder="Mật khẩu mã hóa">${mk?'<input id="k_pw2" type="password" class="inp mb-2" placeholder="Nhập lại mật khẩu">':''}<label class="flex items-center gap-2 text-sm mb-4"><input id="k_rem" type="checkbox"> Ghi nhớ trên thiết bị này</label><button class="btn bg-blue-800 text-white w-full mb-2" onclick="tryKey()">${mk?'Tạo và mở khóa':'Mở khóa'}</button><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>${admin&&!mk?'<button class="btn bg-red-50 text-red-700 w-full mt-3 text-sm" onclick="resetStore()">Quên mật khẩu? Đặt lại kho dữ liệu (xóa hết)</button>':''}`)}
+async function resetStore(){if(!admin||!tok)return alert('Cần đăng nhập Google (có mạng) bằng tài khoản admin.');
+ if(!confirm('ĐẶT LẠI KHO DỮ LIỆU?\nToàn bộ thiết bị, cán bộ và nhật ký giao nhận trên Drive sẽ bị XÓA. Không thể hoàn tác.'))return;if(prompt('Gõ XOA để xác nhận:')!=='XOA')return;
+ try{for(const [fid] of FILES())await dapi('https://www.googleapis.com/upload/drive/v3/files/'+fid+'?uploadType=media',{method:'PATCH',headers:J,body:'{}'});
+  ['gn_v3','gn_salt'].forEach(k=>localStorage.removeItem(k));KEY=null;SALT='';S={devices:{},staff:{},transfers:{},holders:{},requests:{}};Q=[];derive();lastMod={};needCreate=true;try{await idbDel('k')}catch(e){}
+  afterKey=()=>{hideGate();render();sync1()};askKey('Đã đặt lại. Hãy tạo mật khẩu mã hóa mới.')}catch(e){alert('Không đặt lại được: '+e.message)}}
 async function tryKey(){const p=document.getElementById('k_pw').value,mk=needCreate&&admin;if(!p)return;
  if(mk){if(p.length<8)return askKey('Mật khẩu tối thiểu 8 ký tự');if(p!==document.getElementById('k_pw2').value)return askKey('Hai mật khẩu không khớp')}
  const rem=document.getElementById('k_rem').checked;
- try{let salt=localStorage.getItem('gn_salt')||SALT,w=null;
-  if(tok&&navigator.onLine){w=await dapi(DRV+CFG.deviceId+'?alt=media');if(w&&w.salt)salt=w.salt}
+ try{let salt='',ws=[];
+  if(tok&&navigator.onLine){ws=await Promise.all(FILES().map(f=>dapi(DRV+f[0]+'?alt=media')));const e=ws.find(w=>w&&w.ct&&w.salt);if(e)salt=e.salt}
+  else salt=localStorage.getItem('gn_salt')||SALT;
   if(!salt){if(!mk)return askKey(navigator.onLine?'Kho dữ liệu chưa được mã hóa. Nhờ admin mở app và tạo mật khẩu trước.':'Cần kết nối mạng để mở khóa lần đầu.');salt=newSalt()}
   KEY=await kdf(p,salt);SALT=salt;
-  if(w&&w.ct)await decObj(w);else if(!w){const c=localStorage.getItem('gn_v3');if(c)await decObj(JSON.parse(c))}
-  localStorage.setItem('gn_salt',salt);if(rem)await idbPut('k',KEY);else await idbDel('k');
+  if(ws.length){for(const w of ws)if(w&&w.ct)await decObj(w)}else{const c=localStorage.getItem('gn_v3');if(c)await decObj(JSON.parse(c))}
+  if(mk&&ws.length){let i=0;for(const f of FILES())await upl(f[0],ws[i++]||{})}
+  localStorage.setItem('gn_salt',salt);try{if(rem)await idbPut('k',KEY);else await idbDel('k')}catch(e){}
   await loadLocal();needCreate=false;const f=afterKey;afterKey=null;f&&f()}
  catch(e){KEY=null;askKey('Sai mật khẩu mã hóa')}}
 async function changeKey(){const p=prompt('Mật khẩu mã hóa MỚI (từ 8 ký tự):');if(!p)return;if(p.length<8)return alert('Tối thiểu 8 ký tự');if(prompt('Nhập lại mật khẩu mới:')!==p)return alert('Hai mật khẩu không khớp');
@@ -105,7 +113,7 @@ async function afterTok(){try{const u=await dapi('https://www.googleapis.com/oau
   admin=!!(m&&m.capabilities&&m.capabilities.canEdit);role=admin?'admin':'user';
   try{localStorage.setItem('gn_admin',admin?'1':'0');localStorage.setItem('gn_prof',JSON.stringify({me,prof}))}catch(e){}
   const go=()=>{hideGate();render();sync1()};if(KEY)return go();
-  const w=await dapi(DRV+CFG.deviceId+'?alt=media');needCreate=!(w&&w.ct&&w.salt);afterKey=go;askKey()}catch(e){showLogin('Không đăng nhập được: '+(e.message||e))}}
+  const ws=await Promise.all(FILES().map(f=>dapi(DRV+f[0]+'?alt=media')));needCreate=!ws.some(w=>w&&w.ct&&w.salt);afterKey=go;askKey()}catch(e){showLogin('Không đăng nhập được: '+(e.message||e))}}
 function showPick(msg){showGate(LOGO+`<p class="my-3 text-sm">Để bảo mật, ứng dụng chỉ truy cập <b>3 tệp dữ liệu</b> được liên kết. Bấm nút bên dưới, chọn cả 3 tệp trong danh sách rồi bấm <b>Select</b>.</p>${msg?`<p class="text-sm text-red-600 mb-2">${E(msg)}</p>`:''}<button class="btn bg-blue-800 text-white w-full mb-2" onclick="openPicker()">Chọn 3 tệp dữ liệu</button><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>`)}
 function openPicker(){if(!window.gapi)return alert('Chưa tải được bộ chọn tệp của Google. Kiểm tra kết nối mạng.');
  gapi.load('picker',()=>{const v=new google.picker.DocsView().setIncludeFolders(false).setFileIds(FILES().map(f=>f[0]).join(','));
@@ -133,7 +141,7 @@ async function sync1(){if(busy||!CFG||!tok||!KEY||Date.now()>tokExp||!navigator.
     catch(e){if(e.status===403){Q=Q.filter(q=>!mine.includes(q));lastMod[fid]='';setTimeout(sync1,300);alert('Bạn không có quyền ghi vào danh mục này. Thay đổi đã bị hủy.');continue}else throw e}}
    Q=Q.filter(q=>!done.includes(q));cols.forEach(c=>{S[c]=rem[c]||{};got[c]=1});
    const m2=await dapi(DRV+fid+'?fields=modifiedTime');lastMod[fid]=dirty?'':m2.modifiedTime}
-  live=true}catch(e){live=false;if(e.message==='BADKEY'){KEY=null;idbDel('k').catch(()=>{});afterKey=()=>{hideGate();render();sync()};askKey('Mật khẩu mã hóa đã thay đổi hoặc không khớp. Nhập lại.')}}
+  live=true}catch(e){live=false;if(e.message==='BADKEY'){KEY=null;SALT='';lastMod={};['gn_salt','gn_v3'].forEach(k=>localStorage.removeItem(k));idbDel('k').catch(()=>{});afterKey=()=>{hideGate();render();sync()};askKey('Mật khẩu mã hóa đã thay đổi hoặc không khớp. Nhập lại.')}}
  busy=false;if(JSON.stringify(S)!==before){derive();persist();render()}else persist();sync();checkConfirm()}
 function startCloud(){const C=cfgResolve();if(!C){noCloud=true;admin=true;return sync()}
  CFG={...C,deviceId:idOf(C.deviceFile),staffId:idOf(C.staffFile),logId:idOf(C.logFile)};setInterval(autoRenew,60000);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoRenew()});document.addEventListener('click',()=>{if(needAuth())renew(false)},true);let c=null;try{c=JSON.parse(localStorage.getItem('gn_prof'))}catch(e){}
