@@ -9,13 +9,22 @@
 - Mặc định app chỉ xin quyền truy cập **đúng 3 tệp được chọn** (không đọc phần còn lại của Drive).
 - Dữ liệu được **mã hóa AES-256 trên thiết bị** trước khi lưu vào máy và tải lên Drive. Đồng bộ khoảng 8-10 giây một lần; mất mạng vẫn dùng được và tự gửi lên khi có mạng.
 
+## Cập nhật app mà không mất liên kết Drive (quan trọng)
+`drive-config.js` là tệp **của bạn** (chứa Client ID và 3 liên kết Drive). Gói cập nhật chỉ có `drive-config.mau.js` nên **không ghi đè** tệp của bạn. Khi tải bản mới lên GitHub, chỉ chép đè các tệp khác, **đừng xóa hay thay `drive-config.js`**. Nếu lỡ bị ghi đè bằng tệp mẫu, các máy từng mở app trước đó vẫn tự dùng cấu hình đã lưu trên máy; nên điền lại tệp cho các máy khác.
+
+## Khi app báo "Chưa kết nối Drive - chỉ lưu trên máy này"
+Chạm vào dòng cảnh báo ở đầu app để xem lý do. Cách xử lý:
+1. Mở `drive-config.js` trên GitHub, kiểm tra `clientId` đã điền (không còn chữ `DAN_VAO_DAY`).
+2. Điền lại `deviceFile`, `staffFile`, `logFile` (tìm tệp `QLTB` trên Drive → chuột phải → Chia sẻ → Sao chép đường liên kết). Không bấm "Tạo 3 tệp" lần nữa nếu 3 tệp cũ vẫn còn, vì sẽ tạo bản trống mới.
+3. Lưu rồi tải lại app (kéo xuống làm mới, hoặc đóng hẳn rồi mở lại để điện thoại nhận bản mới).
+
 ## 1. Cấu hình Google Cloud (admin, làm một lần)
 1. Vào https://console.cloud.google.com → tạo **dự án mới**. Ghi lại **Project number** (số dự án) ở trang Dashboard.
 2. **APIs & Services → Library**: bật **Google Drive API** và **Google Picker API**.
 3. **OAuth consent screen**: loại **External**, điền tên app và email hỗ trợ, để trạng thái **Testing**, thêm **Test users** là Gmail của admin và từng cán bộ (tối đa 100).
 4. **Credentials → Create credentials → OAuth client ID** → **Web application** → *Authorized JavaScript origins*: `https://TEN-TAI-KHOAN.github.io` (thử trên máy thì thêm `http://localhost:8000`). Sao chép **Client ID**.
 5. **Credentials → Create credentials → API key** → vào khóa vừa tạo: *Application restrictions* chọn **Websites** và thêm `https://TEN-TAI-KHOAN.github.io/*`; *API restrictions* chọn **Google Picker API**. Sao chép khóa.
-6. Mở `drive-config.js`, điền `clientId`, `apiKey`, `appId` (= Project number).
+6. **Đổi tên** tệp `drive-config.mau.js` thành `drive-config.js`, mở ra và điền `clientId`, `apiKey`, `appId` (= Project number).
 
 ## 2. Tạo và liên kết 3 tệp (admin)
 1. Tải app lên GitHub Pages, mở app, đăng nhập Google bằng tài khoản admin. App hiện nút **Tạo 3 tệp trên Drive** → bấm.
@@ -59,6 +68,6 @@ App vẽ biên bản trên màn hình tạm thời (hiện chữ "Đang tạo PD
 ## Lưu ý
 - Bản này dùng **3 tệp mới**. Dữ liệu của bản 2 tệp trước đó không tự chuyển sang, cần nhập lại.
 - Mất mật khẩu mã hóa = mất dữ liệu, không ai khôi phục được.
-- Chế độ Testing: Google có thể bắt đăng nhập lại khoảng mỗi 7 ngày; phiên làm việc hết sau 1 giờ (chạm vào dòng cảnh báo trên đầu app để đăng nhập lại, thay đổi vẫn được giữ).
+- Chế độ Testing: Google có thể bắt đăng nhập lại khoảng mỗi 7 ngày; phiên truy cập Google chỉ sống 1 giờ (quy định của Google). App **tự gia hạn** im lặng trước khi hết hạn; nếu trình duyệt chặn thì **chạm vào bất kỳ đâu** trên app hoặc vào dòng cảnh báo ở đầu app để gia hạn (có thể thấy cửa sổ Google lóe lên). Thay đổi không bị mất, được giữ lại và gửi sau.
 - Không đổi tên, xóa hay di chuyển 3 tệp trong Drive của admin.
-- Khi sửa mã, đổi `qltb-v8` trong sw.js thành bản mới để điện thoại cập nhật.
+- Khi sửa mã, đổi `qltb-v10` trong sw.js thành bản mới để điện thoại cập nhật.
