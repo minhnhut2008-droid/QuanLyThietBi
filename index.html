@@ -78,17 +78,11 @@ function hideGate(){const g=document.getElementById('gate');g.classList.add('hid
 const gv=k=>document.getElementById(k).value.trim(),LOGO='<h1 class="text-xl font-bold text-blue-900 mb-1">★ Quản Lý Thiết Bị</h1>';
 function showLogin(msg){showGate(LOGO+`<p class="text-sm text-slate-500 mb-4">Đăng nhập bằng tài khoản Google (Gmail) để dùng chung dữ liệu lưu trên Google Drive.</p>${msg?`<p class="text-sm text-red-600 mb-3">${E(msg)}</p>`:''}<button class="btn bg-blue-800 text-white w-full" onclick="signIn()">Đăng nhập bằng Google</button>`)}
 function showWait(t){showGate(LOGO+`<p class="my-4 text-sm">${t}</p><button class="btn bg-slate-100 w-full" onclick="logout()">Đăng xuất</button>`)}
-let authing=false,renewing=false;
-function mkTc(){return tc=tc||google.accounts.oauth2.initTokenClient({client_id:CFG.clientId,scope:'openid email profile https://www.googleapis.com/auth/drive'+(CFG.picker===false?'':'.file'),callback:onTokResp,error_callback:()=>{authing=false;renewing=false;sync()}})}
-function onTokResp(r){authing=false;if(r.error){if(renewing){renewing=false;sync();return}return showLogin('Không đăng nhập được: '+r.error)}
- tok=r.access_token;tokExp=Date.now()+(r.expires_in-60)*1000;if(renewing){renewing=false;sync();flush();return}afterTok()}
-function renew(silent){if(authing||!window.google||!CFG||!me||!navigator.onLine)return;authing=true;renewing=true;setTimeout(()=>{authing=false;renewing=false},20000);
- try{mkTc().requestAccessToken({prompt:silent?'none':'',hint:me.email})}catch(e){authing=false;renewing=false}}
-function autoRenew(){if(!CFG||!me||!navigator.onLine)return;if(!tok||Date.now()>tokExp-300000)renew(true)}
 function signIn(){if(!window.google)return alert('Chưa tải được dịch vụ Google. Kiểm tra kết nối mạng rồi thử lại.');
- if(me)return renew(false);authing=true;mkTc().requestAccessToken({prompt:'select_account'})}
+ tc=tc||google.accounts.oauth2.initTokenClient({client_id:CFG.clientId,scope:'openid email profile https://www.googleapis.com/auth/drive'+(CFG.picker===false?'':'.file'),callback:r=>{if(r.error)return showLogin('Không đăng nhập được: '+r.error);tok=r.access_token;tokExp=Date.now()+(r.expires_in-60)*1000;afterTok()}});
+ tc.requestAccessToken(me?{prompt:'',hint:me.email}:{prompt:'select_account'})}
 async function dapi(url,o={}){if(!tok)throw new Error('no token');o.headers={Authorization:'Bearer '+tok,...(o.headers||{})};o.cache='no-store';const r=await fetch(url,o);
- if(r.status===401){tok='';sync();setTimeout(()=>renew(true),0);throw new Error('401')}if(!r.ok){const e=new Error(r.status+' '+(await r.text()).slice(0,100));e.status=r.status;throw e}
+ if(r.status===401){tok='';sync();throw new Error('401')}if(!r.ok){const e=new Error(r.status+' '+(await r.text()).slice(0,100));e.status=r.status;throw e}
  const t=await r.text();if(!t)return{};try{return JSON.parse(t)}catch(e){return{}}}
 let pickTried=false;
 async function afterTok(){try{const u=await dapi('https://www.googleapis.com/oauth2/v3/userinfo');me={uid:u.sub,email:u.email};prof={name:u.name||u.email,email:u.email,phone:''};
@@ -131,7 +125,7 @@ async function sync1(){if(busy||!CFG||!tok||!KEY||Date.now()>tokExp||!navigator.
   live=true}catch(e){live=false;if(e.message==='BADKEY'){KEY=null;idbDel('k').catch(()=>{});afterKey=()=>{hideGate();render();sync()};askKey('Mật khẩu mã hóa đã thay đổi hoặc không khớp. Nhập lại.')}}
  busy=false;if(JSON.stringify(S)!==before){derive();persist();render()}else persist();sync();checkConfirm()}
 function startCloud(){const C=window.DRIVE_CONFIG;if(!C||!C.clientId||/DAN_VAO/.test(C.clientId)){noCloud=true;admin=true;return sync()}
- CFG={...C,deviceId:idOf(C.deviceFile),staffId:idOf(C.staffFile),logId:idOf(C.logFile)};setInterval(autoRenew,60000);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoRenew()});document.addEventListener('click',()=>{if(needAuth())renew(false)},true);let c=null;try{c=JSON.parse(localStorage.getItem('gn_prof'))}catch(e){}
+ CFG={...C,deviceId:idOf(C.deviceFile),staffId:idOf(C.staffFile),logId:idOf(C.logFile)};let c=null;try{c=JSON.parse(localStorage.getItem('gn_prof'))}catch(e){}
  if(c&&c.me){me=c.me;prof=c.prof;admin=localStorage.getItem('gn_admin')==='1';SALT=localStorage.getItem('gn_salt')||'';const go=()=>{hideGate();render();sync()};afterKey=go;
   idbGet('k').then(async k=>{if(k&&SALT){KEY=k;await loadLocal();go()}else askKey()}).catch(()=>askKey())}else showLogin()}
 function initData(){const C=window.DRIVE_CONFIG,cloudOn=C&&C.clientId&&!/DAN_VAO/.test(C.clientId);

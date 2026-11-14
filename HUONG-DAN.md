@@ -59,6 +59,6 @@ App vẽ biên bản trên màn hình tạm thời (hiện chữ "Đang tạo PD
 ## Lưu ý
 - Bản này dùng **3 tệp mới**. Dữ liệu của bản 2 tệp trước đó không tự chuyển sang, cần nhập lại.
 - Mất mật khẩu mã hóa = mất dữ liệu, không ai khôi phục được.
-- Chế độ Testing: Google có thể bắt đăng nhập lại khoảng mỗi 7 ngày; phiên truy cập Google chỉ sống 1 giờ (quy định của Google). App **tự gia hạn** im lặng trước khi hết hạn; nếu trình duyệt chặn thì **chạm vào bất kỳ đâu** trên app hoặc vào dòng cảnh báo ở đầu app để gia hạn (có thể thấy cửa sổ Google lóe lên). Thay đổi không bị mất, được giữ lại và gửi sau.
+- Chế độ Testing: Google có thể bắt đăng nhập lại khoảng mỗi 7 ngày; phiên làm việc hết sau 1 giờ (chạm vào dòng cảnh báo trên đầu app để đăng nhập lại, thay đổi vẫn được giữ).
 - Không đổi tên, xóa hay di chuyển 3 tệp trong Drive của admin.
-- Khi sửa mã, đổi `qltb-v9` trong sw.js thành bản mới để điện thoại cập nhật.
+- Khi sửa mã, đổi `qltb-v8` trong sw.js thành bản mới để điện thoại cập nhật.
